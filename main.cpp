@@ -1,26 +1,25 @@
 #include <iostream>
+#include <vector>
 
 #define CVK_IMPLEMENTATION
 #include "cvk.hpp"
 
 
-template<typename... Args>
-void g(int a, Args&& ...args)
-{
-    std::cout << "A: " << a << "\n";
-}
-
-
-template<typename... Args>
-void f(Args&& ...args)
-{
-    g(args...);
-    std::cout << "Hello, World\n";
-}
-
-
 int main()
 {
+    VkInstance vk_instance;
+
     cvk::VkIns::init("Hello");
+    if (!cvk::VkIns::create(vk_instance)) {
+        std::cerr << "Failed to create vk instance\n";
+        return 1;
+    }
+
+    const auto& exts{cvk::VkExts::get()};
+    for (auto& ext: exts) {
+        std::cout << ext.extensionName << ": " << ext.specVersion << "\n";
+    }
+
+    cvk::VkIns::destroy_all();
     return 0;
 }
