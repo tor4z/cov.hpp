@@ -98,46 +98,7 @@ public:
 
 
 bool create_buffer(VkDevice device, VkPhysicalDevice phy_device, size_t size, VkBufferUsageFlags usage,
-    VkMemoryPropertyFlags property_flags, VkBuffer& buff, VkDeviceMemory& memory)
-{
-    // create buffer
-    VkBufferCreateInfo buff_create_info{};
-    buff_create_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    buff_create_info.size = size;
-    buff_create_info.usage = usage;
-    buff_create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    CVK_CHECK_ASSERT(vkCreateBuffer(device, &buff_create_info, nullptr, &buff))
-
-    VkMemoryRequirements mem_reqs;
-    vkGetBufferMemoryRequirements(device, buff, &mem_reqs);
-
-    VkMemoryAllocateInfo mem_alloc_info{};
-    mem_alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    mem_alloc_info.allocationSize = mem_reqs.size;
-
-    VkPhysicalDeviceMemoryProperties mem_properies;
-    vkGetPhysicalDeviceMemoryProperties(phy_device, &mem_properies);
-
-    bool mem_satisfied{false};
-    for (int i = 0; i < mem_properies.memoryTypeCount; ++i) {
-        if ((mem_reqs.memoryTypeBits & 0x1) &&
-            (mem_properies.memoryTypes[i].propertyFlags & property_flags) == property_flags) {
-            mem_satisfied = true;
-            mem_alloc_info.memoryTypeIndex = i;
-            break;
-        }
-        mem_reqs.memoryTypeBits >>= 1;
-    }
-
-    if (!mem_satisfied) {
-        return false;
-    }
-
-    CVK_CHECK_ASSERT(vkAllocateMemory(device, &mem_alloc_info, nullptr, &memory))
-    CVK_CHECK_ASSERT(vkBindBufferMemory(device, buff, memory, 0))
-    return true;
-}
+    VkMemoryPropertyFlags property_flags, VkBuffer& buff, VkDeviceMemory& memory);
 
 
 template<typename T>
@@ -215,7 +176,7 @@ bool to_device(const T* data, size_t size, VkDevice device,
 // =======================================
 //            Implementation
 // =======================================
-#define CVK_IMPLEMENTATION
+// #define CVK_IMPLEMENTATION
 
 
 #ifdef CVK_IMPLEMENTATION
@@ -506,6 +467,48 @@ bool CommandPool::create(VkDevice device, uint32_t queue_index, VkCommandPool& c
     if (vkCreateCommandPool(device, &create_info, nullptr, &cmd_pool) != VK_SUCCESS) {
         return false;
     }
+    return true;
+}
+
+bool create_buffer(VkDevice device, VkPhysicalDevice phy_device, size_t size, VkBufferUsageFlags usage,
+    VkMemoryPropertyFlags property_flags, VkBuffer& buff, VkDeviceMemory& memory)
+{
+    // create buffer
+    VkBufferCreateInfo buff_create_info{};
+    buff_create_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    buff_create_info.size = size;
+    buff_create_info.usage = usage;
+    buff_create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    CVK_CHECK_ASSERT(vkCreateBuffer(device, &buff_create_info, nullptr, &buff))
+
+    VkMemoryRequirements mem_reqs;
+    vkGetBufferMemoryRequirements(device, buff, &mem_reqs);
+
+    VkMemoryAllocateInfo mem_alloc_info{};
+    mem_alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    mem_alloc_info.allocationSize = mem_reqs.size;
+
+    VkPhysicalDeviceMemoryProperties mem_properies;
+    vkGetPhysicalDeviceMemoryProperties(phy_device, &mem_properies);
+
+    bool mem_satisfied{false};
+    for (int i = 0; i < mem_properies.memoryTypeCount; ++i) {
+        if ((mem_reqs.memoryTypeBits & 0x1) &&
+            (mem_properies.memoryTypes[i].propertyFlags & property_flags) == property_flags) {
+            mem_satisfied = true;
+            mem_alloc_info.memoryTypeIndex = i;
+            break;
+        }
+        mem_reqs.memoryTypeBits >>= 1;
+    }
+
+    if (!mem_satisfied) {
+        return false;
+    }
+
+    CVK_CHECK_ASSERT(vkAllocateMemory(device, &mem_alloc_info, nullptr, &memory))
+    CVK_CHECK_ASSERT(vkBindBufferMemory(device, buff, memory, 0))
     return true;
 }
 
