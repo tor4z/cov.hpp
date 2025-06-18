@@ -9,6 +9,7 @@
 #include <cstring>
 #include <iostream>
 #include <vulkan/vulkan.h>
+#include <vulkan/vulkan_core.h>
 
 #define CVK_DEF_SINGLETON(classname)                        \
     static inline classname* instance()                     \
@@ -100,16 +101,15 @@ public:
 bool create_buffer(VkDevice device, VkPhysicalDevice phy_device, size_t size, VkBufferUsageFlags usage,
     VkMemoryPropertyFlags property_flags, VkBuffer& buff, VkDeviceMemory& memory);
 
+VkBuffer host_buff;
+VkDeviceMemory host_memory;
+VkBuffer device_buff;
+VkDeviceMemory device_memory;
 
 template<typename T>
 bool to_device(const T* data, size_t size, VkDevice device,
     VkPhysicalDevice phy_device, VkCommandPool cmd_pool, VkQueue queue)
 {
-    VkBuffer host_buff;
-    VkDeviceMemory host_memory;
-    VkBuffer device_buff;
-    VkDeviceMemory device_memory;
-
     create_buffer(device, phy_device, size,
         VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, host_buff, host_memory);
@@ -169,6 +169,53 @@ bool to_device(const T* data, size_t size, VkDevice device,
     return true;
 }
 
+
+template<typename T>
+bool to_host(T* data, int size, VkDevice device,
+    VkPhysicalDevice phy_device, VkCommandPool cmd_pool, VkQueue queue)
+{
+    VkCommandBufferAllocateInfo cmd_alloc_info{};
+    cmd_alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    cmd_alloc_info.commandPool = cmd_pool;
+    cmd_alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cmd_alloc_info.commandBufferCount = 1;
+
+    VkCommandBuffer cmd_buff;
+    CVK_CHECK_ASSERT(vkAllocateCommandBuffers(device, &cmd_alloc_info, &cmd_buff));
+
+    VkCommandBufferBeginInfo begin_info{};
+    begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+
+    CVK_CHECK_ASSERT(vkBeginCommandBuffer(cmd_buff, &begin_info))
+    VkBufferCopy copy_region{};
+    copy_region.size = size;
+    vkCmdCopyBuffer(cmd_buff, device_buff, host_buff, 1, &copy_region);
+    CVK_CHECK_ASSERT(vkEndCommandBuffer(cmd_buff))
+
+    // submmit
+    VkSubmitInfo submit_info{};
+    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit_info.commandBufferCount = 1;
+    submit_info.pCommandBuffers = &cmd_buff;
+
+    VkFenceCreateInfo fence_info{};
+    VkFence fence{};
+    fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    fence_info.flags = 0;
+    CVK_CHECK_ASSERT(vkCreateFence(device, &fence_info, nullptr, &fence))
+    CVK_CHECK_ASSERT(vkQueueSubmit(queue, 1, &submit_info, fence))
+    CVK_CHECK_ASSERT(vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX))
+
+    vkDestroyFence(device, fence, nullptr);
+    vkFreeCommandBuffers(device, cmd_pool, 1, &cmd_buff);
+
+    void* mapped_data;
+    vkMapMemory(device, host_memory, 0, size, 0, &mapped_data);
+    memcpy(data, mapped_data, size);
+    vkUnmapMemory(device, host_memory);
+    return true;
+}
+
 } // namespace cvk
 
 #endif // CVK_H_
@@ -176,7 +223,7 @@ bool to_device(const T* data, size_t size, VkDevice device,
 // =======================================
 //            Implementation
 // =======================================
-// #define CVK_IMPLEMENTATION
+#define CVK_IMPLEMENTATION
 
 
 #ifdef CVK_IMPLEMENTATION

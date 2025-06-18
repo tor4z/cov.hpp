@@ -45,9 +45,15 @@ int main()
         return 1;
     }
 
-    std::vector<int> data{1, 2, 3, 4, 5, 6};
+    std::vector<int> int_data{1, 2, 3, 4, 5, 6};
+    std::vector<int> out_data(int_data.size());
 
-    cvk::to_device(data.data(), data.size() * sizeof(data.at(0)), device, phy_device, cmd_pool, queue);
+    cvk::to_device(int_data.data(), int_data.size() * sizeof(int_data.at(0)), device, phy_device, cmd_pool, queue);
+    cvk::to_host(out_data.data(), out_data.size() * sizeof(out_data.at(0)), device, phy_device, cmd_pool, queue);
+
+    for (auto it : out_data) {
+        std::cout << it << "\n";
+    }
 
     cvk::Device::destroy(device);
     cvk::App::destroy_all_instance();
