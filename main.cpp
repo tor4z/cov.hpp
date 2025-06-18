@@ -1,4 +1,5 @@
 #include <iostream>
+#include <vector>
 #include <vulkan/vulkan_core.h>
 
 #define CVK_IMPLEMENTATION
@@ -27,12 +28,26 @@ int main()
         return 1;
     }
 
+    VkPhysicalDeviceProperties properties;
+    cvk::PhyDevice::properties(phy_device, properties);
+    std::cout << "GPU Device: " << properties.deviceName << "\n";
+
     VkDevice device;
     VkQueue queue;
     if (!cvk::Device::create(phy_device, queue_index, device, queue)) {
         std::cerr << "Failed to create device\n";
         return 1;
     }
+
+    VkCommandPool cmd_pool;
+    if (!cvk::CommandPool::create(device, queue_index, cmd_pool)) {
+        std::cerr << "Failed to create command pool";
+        return 1;
+    }
+
+    std::vector<int> data{1, 2, 3, 4, 5, 6};
+
+    cvk::to_device(data.data(), data.size() * sizeof(data.at(0)), device, phy_device, cmd_pool, queue);
 
     cvk::Device::destroy(device);
     cvk::App::destroy_all_instance();
