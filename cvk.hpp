@@ -1,14 +1,10 @@
 #ifndef CVK_H_
 #define CVK_H_
 
-#include <cstdint>
-#include <iostream>
-#include <mutex>
-#include <vector>
-#include <cstring>
 #include <vulkan/vulkan.h>
-#include <vulkan/vulkan_core.h>
-
+#include <optional>
+#include <vector>
+#include <mutex>
 
 #define CVK_DEF_SINGLETON(classname)                        \
     static inline classname* instance()                     \
@@ -62,13 +58,24 @@ private:
 class PhyDevice
 {
 public:
-    static VkPhysicalDevice get(const VkInstance& vk_ins);
+    static bool get(const VkInstance& vk_ins, VkPhysicalDevice& device, uint32_t& queue_index);
 private:
-
     CVK_DEF_SINGLETON(PhyDevice);
     PhyDevice();
-    static bool is_available(VkPhysicalDevice device);
+    static std::optional<uint32_t> find_available_queue(VkPhysicalDevice device);
+    static bool property_available(VkPhysicalDevice device);
 }; // class PhyDevice
+
+class Device
+{
+public:
+    static bool create(VkPhysicalDevice phy_device, uint32_t queue_index, VkDevice& device, VkQueue& queue);
+    static void destroy(VkDevice device);
+private:
+    CVK_DEF_SINGLETON(Device)
+
+    Device();
+}; // class Device
 
 } // namespace cvk
 
@@ -84,7 +91,34 @@ private:
 #ifndef CVK_IMPLEMENTATION_CPP_
 #define CVK_IMPLEMENTATION_CPP_
 
+#include <cstdint>
+#include <cstdlib>
+#include <iostream>
+#include <cstring>
+
+
+#ifdef NDEBUG
+#   define CVK_ENABLE_VALIDATION 0
+#else
+#   define CVK_ENABLE_VALIDATION 1
+#endif
+
+#define CHECK_VALIDATION_AVAILABLE()                                            \
+    do {                                                                        \
+        for (auto layer: vck_validation_layers) {                               \
+            if (!Extensions::has(layer)) {                                      \
+                std::cerr << "Validation layer: " << layer << " not found\n";   \
+                exit(1);                                                        \
+            }                                                                   \
+        }                                                                       \
+    } while (0)
+
+
 namespace cvk {
+
+const std::vector<const char*> vck_validation_layers = {
+    "VK_LAYER_KHRONOS_validation"
+}; // vck_validation_layers
 
 App::App() {}
 
@@ -105,27 +139,17 @@ bool App::create_instance(VkInstance& vk_instance)
 {
     auto ins{instance()};
 
-    VkInstanceCreateInfo info{};
-    info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-    info.pApplicationInfo = &(ins->vk_app_info_);
-#ifdef NDEBUG
-    info.enabledLayerCount = 0;
-#else // NDEBUG
-    static const std::vector<const char*> validation_layers = {
-        "VK_LAYER_KHRONOS_validation"
-    };
-
-    for (auto layer: validation_layers) {
-        if (!Extensions::has(layer)) {
-            std::cerr << "Validation layer: " << layer << " not found\n";
-            return false;
-        }
-    }
-
-    info.enabledLayerCount = static_cast<uint32_t>(validation_layers.size());
-    info.ppEnabledLayerNames = validation_layers.data();
-#endif // NDEBUG
-    if (vkCreateInstance(&info, nullptr, &vk_instance) != VK_SUCCESS) {
+    VkInstanceCreateInfo create_info{};
+    create_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+    create_info.pApplicationInfo = &(ins->vk_app_info_);
+#if CVK_ENABLE_VALIDATION
+    CHECK_VALIDATION_AVAILABLE();
+    create_info.enabledLayerCount = static_cast<uint32_t>(vck_validation_layers.size());
+    create_info.ppEnabledLayerNames = vck_validation_layers.data();
+#else // CVK_ENABLE_VALIDATION
+    create_info.enabledLayerCount = 0;
+#endif // CVK_ENABLE_VALIDATION
+    if (vkCreateInstance(&create_info, nullptr, &vk_instance) != VK_SUCCESS) {
         return false;
     }
 
@@ -174,23 +198,30 @@ bool Extensions::has(const char* ext_name)
 PhyDevice::PhyDevice() {}
 
 
-VkPhysicalDevice PhyDevice::get(const VkInstance& vk_ins)
+bool PhyDevice::get(const VkInstance& vk_ins, VkPhysicalDevice& device, uint32_t& que_family_index)
 {
     uint32_t count{0};
     vkEnumeratePhysicalDevices(vk_ins, &count, nullptr);
     std::vector<VkPhysicalDevice> devices(count);
     vkEnumeratePhysicalDevices(vk_ins, &count, devices.data());
-    
-    for (auto device : devices) {
-        if (is_available(device)) {
-            return device;
+
+    std::optional<uint32_t> queue_index;
+    for (auto dev : devices) {
+        if (property_available(dev)) {
+            queue_index = find_available_queue(dev);
+            if (queue_index.has_value()) {
+                device = dev;
+                que_family_index = queue_index.value();
+                return true;
+            }
         }
     }
 
-    return VK_NULL_HANDLE;
+    device = VK_NULL_HANDLE;
+    return false;
 }
 
-bool PhyDevice::is_available(VkPhysicalDevice device)
+bool PhyDevice::property_available(VkPhysicalDevice device)
 {
     if (device == VK_NULL_HANDLE) {
         return false;
@@ -203,6 +234,71 @@ bool PhyDevice::is_available(VkPhysicalDevice device)
     // vkGetPhysicalDeviceFeatures(device, &features);
 
     return true;
+}
+
+std::optional<uint32_t> PhyDevice::find_available_queue(VkPhysicalDevice device)
+{
+    if (device == VK_NULL_HANDLE) {
+        return false;
+    }
+
+    std::optional<uint32_t> result;
+    uint32_t que_family_count{0};
+    vkGetPhysicalDeviceQueueFamilyProperties(device, &que_family_count, nullptr);
+    std::vector<VkQueueFamilyProperties> que_family_properties(que_family_count);
+    vkGetPhysicalDeviceQueueFamilyProperties(device, &que_family_count, que_family_properties.data());
+
+    for (int i = 0; i < que_family_properties.size(); ++i) {
+        const auto& que{que_family_properties.at(i)};
+        if (que.queueFlags & VK_QUEUE_COMPUTE_BIT) {
+            result = i;
+            break;
+        }
+    }
+
+    return result;
+}
+
+Device::Device() {}
+
+bool Device::create(VkPhysicalDevice phy_device, uint32_t queue_index, VkDevice& device, VkQueue& queue)
+{
+    float queue_priority{1.0f}; // 0.0f~1.0f
+
+    VkDeviceQueueCreateInfo que_create_info{};
+    que_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+    que_create_info.queueCount = 1;
+    que_create_info.queueFamilyIndex = queue_index;
+    que_create_info.pQueuePriorities = &queue_priority;
+
+    VkPhysicalDeviceFeatures device_features{};
+
+    VkDeviceCreateInfo create_info{};
+    create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    create_info.pQueueCreateInfos = &que_create_info;
+    create_info.queueCreateInfoCount = 1;
+    create_info.pEnabledFeatures = &device_features;
+#if CVK_ENABLE_VALIDATION
+    CHECK_VALIDATION_AVAILABLE();
+    create_info.ppEnabledLayerNames = vck_validation_layers.data();
+    create_info.enabledLayerCount = static_cast<uint32_t>(vck_validation_layers.size());
+#else // CVK_ENABLE_VALIDATION
+    create_info.enabledLayerCount = 0;
+#endif // CVK_ENABLE_VALIDATION
+
+    if (vkCreateDevice(phy_device, &create_info, nullptr, &device) != VK_SUCCESS) {
+        return false;
+    }
+
+    vkGetDeviceQueue(device, queue_index, 0, &queue);
+    return true;
+}
+
+void Device::destroy(VkDevice device)
+{
+    if (device != VK_NULL_HANDLE) {
+        vkDestroyDevice(device, nullptr);
+    }
 }
 
 } // namespace cvk
