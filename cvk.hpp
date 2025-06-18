@@ -7,6 +7,7 @@
 #include <vector>
 #include <cstring>
 #include <vulkan/vulkan.h>
+#include <vulkan/vulkan_core.h>
 
 
 #define CVK_DEF_SINGLETON(classname)                        \
@@ -30,34 +31,44 @@ private:                                                    \
 
 namespace cvk {
 
-class VkExts
+class Extensions
 {
 public:
     static const std::vector<VkExtensionProperties>& get();
-    static bool has_ext(const char* ext_name);
+    static bool has(const char* ext_name);
 private:
     std::vector<VkExtensionProperties> exts_;
 
-    CVK_DEF_SINGLETON(VkExts)
-    VkExts();
-}; // class VkExts
+    CVK_DEF_SINGLETON(Extensions)
+    Extensions();
+}; // class Extensions
 
-class VkIns
+class App
 {
 public:
     static void init(const char* app_name);
-    static bool create(VkInstance& instance);
-    static void destroy(const VkInstance& instance);
-    static void destroy_all();
+    static bool create_instance(VkInstance& instance);
+    static void destroy_instance(const VkInstance& instance);
+    static void destroy_all_instance();
 private:
     VkApplicationInfo vk_app_info_;
     std::vector<VkInstance> vk_ins_;
 
-    CVK_DEF_SINGLETON(VkIns)
-    VkIns();
-    ~VkIns();
-}; // class VkIns
+    CVK_DEF_SINGLETON(App)
+    App();
+    ~App();
+}; // class App
 
+class PhyDevice
+{
+public:
+    static VkPhysicalDevice get(const VkInstance& vk_ins);
+private:
+
+    CVK_DEF_SINGLETON(PhyDevice);
+    PhyDevice();
+    static bool is_available(VkPhysicalDevice device);
+}; // class PhyDevice
 
 } // namespace cvk
 
@@ -75,11 +86,11 @@ private:
 
 namespace cvk {
 
-VkIns::VkIns() {}
+App::App() {}
 
-VkIns::~VkIns() {}
+App::~App() {}
 
-void VkIns::init(const char* app_name)
+void App::init(const char* app_name)
 {
     auto ins{instance()};
     ins->vk_app_info_.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -90,7 +101,7 @@ void VkIns::init(const char* app_name)
     ins->vk_app_info_.apiVersion = VK_API_VERSION_1_4;
 }
 
-bool VkIns::create(VkInstance& vk_instance)
+bool App::create_instance(VkInstance& vk_instance)
 {
     auto ins{instance()};
 
@@ -105,7 +116,7 @@ bool VkIns::create(VkInstance& vk_instance)
     };
 
     for (auto layer: validation_layers) {
-        if (!VkExts::has_ext(layer)) {
+        if (!Extensions::has(layer)) {
             std::cerr << "Validation layer: " << layer << " not found\n";
             return false;
         }
@@ -122,20 +133,20 @@ bool VkIns::create(VkInstance& vk_instance)
     return true;
 }
 
-void VkIns::destroy(const VkInstance& instance)
+void App::destroy_instance(const VkInstance& instance)
 {
     vkDestroyInstance(instance, nullptr);
 }
 
-void VkIns::destroy_all()
+void App::destroy_all_instance()
 {
     auto ins{instance()};
     for (const auto& vk_ins: ins->vk_ins_) {
-        destroy(vk_ins);
+        destroy_instance(vk_ins);
     }
 }
 
-VkExts::VkExts()
+Extensions::Extensions()
 {
     uint32_t count;
     vkEnumerateInstanceExtensionProperties(nullptr, &count, nullptr);
@@ -143,12 +154,12 @@ VkExts::VkExts()
     vkEnumerateInstanceExtensionProperties(nullptr, &count, exts_.data());
 }
 
-const std::vector<VkExtensionProperties>& VkExts::get()
+const std::vector<VkExtensionProperties>& Extensions::get()
 {
     return instance()->exts_;
 }
 
-bool VkExts::has_ext(const char* ext_name)
+bool Extensions::has(const char* ext_name)
 {
     const auto& exts{get()};
     for (const auto& ext: exts) {
@@ -159,8 +170,42 @@ bool VkExts::has_ext(const char* ext_name)
     return false;
 }
 
+
+PhyDevice::PhyDevice() {}
+
+
+VkPhysicalDevice PhyDevice::get(const VkInstance& vk_ins)
+{
+    uint32_t count{0};
+    vkEnumeratePhysicalDevices(vk_ins, &count, nullptr);
+    std::vector<VkPhysicalDevice> devices(count);
+    vkEnumeratePhysicalDevices(vk_ins, &count, devices.data());
+    
+    for (auto device : devices) {
+        if (is_available(device)) {
+            return device;
+        }
+    }
+
+    return VK_NULL_HANDLE;
+}
+
+bool PhyDevice::is_available(VkPhysicalDevice device)
+{
+    if (device == VK_NULL_HANDLE) {
+        return false;
+    }
+
+    // VkPhysicalDeviceProperties properties;
+    // VkPhysicalDeviceFeatures features;
+
+    // vkGetPhysicalDeviceProperties(device, &properties);
+    // vkGetPhysicalDeviceFeatures(device, &features);
+
+    return true;
+}
+
 } // namespace cvk
 
 #endif // CVK_IMPLEMENTATION_CPP_
 #endif // CVK_IMPLEMENTATION
-
