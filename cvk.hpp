@@ -293,7 +293,7 @@ bool Instance::to_host(void* data, size_t size)
     vkCmdCopyBuffer(cmd_buff, device_buff_, host_buff_, 1, &copy_region);
     CVK_CHECK_ASSERT(vkEndCommandBuffer(cmd_buff))
 
-    // submmit
+    // submit
     VkSubmitInfo submit_info{};
     submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submit_info.commandBufferCount = 1;
