@@ -49,7 +49,7 @@ private:
 class Instance
 {
 public:
-    ~Instance();
+    ~Instance() { destroy(); }
     bool to_device(const void* data, size_t size);
     bool to_host(void* data, size_t size);
     bool execute(const std::string& shader_path);
@@ -200,23 +200,16 @@ Instance::Instance(VkInstance vk_instance) : vk_instance_(vk_instance)
     PhysicalDevice physical_device_creator;
     Device device_creator;
 
-    physical_device_creator.get(vk_instance, phy_device_, queue_index_);
+    physical_device_creator.get(vk_instance_, phy_device_, queue_index_);
     device_creator.create(phy_device_, queue_index_, device_, queue_);
     init_command_pool(device_, queue_index_, cmd_pool_);
-    // VkBuffer host_buff_;
-    // VkDeviceMemory host_memory_;
-    // VkBuffer device_buff_;
-    // VkDeviceMemory device_memory_;
-}
-
-Instance::~Instance()
-{
-    destroy();
 }
 
 void Instance::destroy()
 {
-
+    vkDestroyCommandPool(device_, cmd_pool_, nullptr);
+    vkDestroyDevice(device_, nullptr);
+    vkDestroyInstance(vk_instance_, nullptr);
 }
 
 bool Instance::to_device(const void* data, size_t size)
