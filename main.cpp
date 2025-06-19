@@ -45,10 +45,12 @@ int main()
         return 1;
     }
 
-    std::vector<int> int_data{1, 2, 3, 4, 5, 6};
+    std::vector<int> int_data{1, 2, 3, 4, 5, 6, 7};
     std::vector<int> out_data(int_data.size());
 
     cvk::to_device(int_data.data(), int_data.size() * sizeof(int_data.at(0)), device, phy_device, cmd_pool, queue);
+    auto shader{cvk::load_shader(device, "../headless.comp.spv")};
+    cvk::execute(device, queue, shader, cmd_pool, int_data.size());
     cvk::to_host(out_data.data(), out_data.size() * sizeof(out_data.at(0)), device, phy_device, cmd_pool, queue);
 
     for (auto it : out_data) {

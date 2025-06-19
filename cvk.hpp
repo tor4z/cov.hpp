@@ -696,6 +696,51 @@ bool execute(VkDevice device, VkQueue queue, VkShaderModule shader, VkCommandPoo
     fence_create_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
     CVK_CHECK_ASSERT(vkCreateFence(device, &fence_create_info, nullptr, &fence))
 
+    VkCommandBufferBeginInfo cmd_begin_info{};
+    cmd_begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    CVK_CHECK_ASSERT(vkBeginCommandBuffer(cmd_buff, &cmd_begin_info))
+
+    VkBufferMemoryBarrier mem_buff_barrier{};
+    mem_buff_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+    mem_buff_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    mem_buff_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    mem_buff_barrier.buffer = device_buff;
+    mem_buff_barrier.size = VK_WHOLE_SIZE;
+    mem_buff_barrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
+    mem_buff_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+    vkCmdPipelineBarrier(cmd_buff, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0,
+        0, nullptr,
+        1, &mem_buff_barrier,
+        0, nullptr);
+
+    vkCmdBindPipeline(cmd_buff, VK_PIPELINE_BIND_POINT_COMPUTE, comp_pipeline);
+    vkCmdBindDescriptorSets(cmd_buff, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_layout, 0, 1, &desc_set, 0, nullptr);
+    vkCmdDispatch(cmd_buff, num_spec_element, 1, 1);
+
+    // mem_buff_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    // mem_buff_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    // mem_buff_barrier.buffer = device_buff;
+    // mem_buff_barrier.size = VK_WHOLE_SIZE;
+    // mem_buff_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    // mem_buff_barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    // vkCmdPipelineBarrier(cmd_buff, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
+    //     0, nullptr,
+    //     1, &mem_buff_barrier,
+    //     0, nullptr);
+    CVK_CHECK_ASSERT(vkEndCommandBuffer(cmd_buff))
+    vkResetFences(device, 1, &fence);
+
+
+    const VkPipelineStageFlags wait_stage_mask{VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT};
+    VkSubmitInfo submit_info{};
+    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit_info.commandBufferCount = 1;
+    submit_info.pCommandBuffers = &cmd_buff;
+    submit_info.pWaitDstStageMask = &wait_stage_mask;
+    CVK_CHECK_ASSERT(vkQueueSubmit(queue, 1, &submit_info, fence))
+    CVK_CHECK_ASSERT(vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX))
+
     return true;
 }
 
