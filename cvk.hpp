@@ -1,82 +1,38 @@
 #ifndef CVK_H_
 #define CVK_H_
 
-#include <cassert>
-#include <cstddef>
-#include <fstream>
-#include <ios>
-#include <optional>
-#include <vector>
 #include <mutex>
-#include <cstring>
-#include <iostream>
+#include <optional>
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_core.h>
 
-#define CVK_DEF_SINGLETON(classname)                        \
-    static inline classname* instance()                     \
-    {                                                       \
-        static classname *instance_ = nullptr;              \
-        static std::once_flag flag;                         \
-        if (!instance_) {                                   \
-            std::call_once(flag, [&](){                     \
-                instance_ = new (std::nothrow) classname(); \
-            });                                             \
-        }                                                   \
-        return instance_;                                   \
-    }                                                       \
-private:                                                    \
-    classname(const classname&) = delete;                   \
-    classname& operator=(const classname&) = delete;        \
-    classname(const classname&&) = delete;                  \
+#define CVK_DEF_SINGLETON(classname)                                            \
+    static inline classname* instance()                                         \
+    {                                                                           \
+        static classname *instance_ = nullptr;                                  \
+        static std::once_flag flag;                                             \
+        if (!instance_) {                                                       \
+            std::call_once(flag, [&](){                                         \
+                instance_ = new (std::nothrow) classname();                     \
+            });                                                                 \
+        }                                                                       \
+        return instance_;                                                       \
+    }                                                                           \
+private:                                                                        \
+    classname(const classname&) = delete;                                       \
+    classname& operator=(const classname&) = delete;                            \
+    classname(const classname&&) = delete;                                      \
     classname& operator=(const classname&&) = delete;
-
-#define CVK_CHECK_ASSERT(result)                                                \
-    if ((result) != VK_SUCCESS) {                                               \
-        std::cerr << "Vulkan Failed with error: " << stringify(result) << "\n"; \
-        assert(false);                                                          \
-    }
 
 namespace cvk {
 
-std::string stringify(VkResult result);
-
-class Extensions
+class PhysicalDevice
 {
 public:
-    static const std::vector<VkExtensionProperties>& get();
-    static bool has(const char* ext_name);
+    PhysicalDevice();
+    bool get(const VkInstance& vk_ins, VkPhysicalDevice& device, uint32_t& queue_index);
+    void properties(VkPhysicalDevice device, VkPhysicalDeviceProperties& properties);
 private:
-    std::vector<VkExtensionProperties> exts_;
-
-    CVK_DEF_SINGLETON(Extensions)
-    Extensions();
-}; // class Extensions
-
-class App
-{
-public:
-    static void init(const char* app_name);
-    static bool create_instance(VkInstance& instance);
-    static void destroy_instance(const VkInstance& instance);
-    static void destroy_all_instance();
-private:
-    VkApplicationInfo vk_app_info_;
-    std::vector<VkInstance> vk_ins_;
-
-    CVK_DEF_SINGLETON(App)
-    App();
-    ~App();
-}; // class App
-
-class PhyDevice
-{
-public:
-    static bool get(const VkInstance& vk_ins, VkPhysicalDevice& device, uint32_t& queue_index);
-    static void properties(VkPhysicalDevice device, VkPhysicalDeviceProperties& properties);
-private:
-    CVK_DEF_SINGLETON(PhyDevice);
-    PhyDevice();
     static std::optional<uint32_t> find_available_queue(VkPhysicalDevice device);
     static bool property_available(VkPhysicalDevice device);
 }; // class PhyDevice
@@ -84,139 +40,49 @@ private:
 class Device
 {
 public:
-    static bool create(VkPhysicalDevice phy_device, uint32_t queue_index, VkDevice& device, VkQueue& queue);
-    static void destroy(VkDevice device);
-private:
-    CVK_DEF_SINGLETON(Device)
-
     Device();
+    bool create(VkPhysicalDevice phy_device, uint32_t queue_index, VkDevice& device, VkQueue& queue);
+    void destroy(VkDevice device);
+private:
 }; // class Device
 
-
-class CommandPool
+class Instance
 {
 public:
-    static bool create(VkDevice device, uint32_t queue_index, VkCommandPool& cmd_pool);
-}; // class CommandPool
+    ~Instance();
+    bool to_device(const void* data, size_t size);
+    bool to_host(void* data, size_t size);
+    bool execute(const std::string& shader_path);
+    void destroy();
+private:
+    VkInstance vk_instance_;
+    VkCommandPool cmd_pool_;
+    VkBuffer host_buff_;
+    VkDeviceMemory host_memory_;
+    VkBuffer device_buff_;
+    VkDeviceMemory device_memory_;
+    VkQueue queue_;
+    VkPhysicalDevice phy_device_;
+    VkDevice device_;
+    uint32_t queue_index_;
 
+    friend class App;
+    Instance(VkInstance vk_instance);
+    static bool init_command_pool(VkDevice device, uint32_t queue_index, VkCommandPool& cmd_pool);
+}; // class Instance
 
-bool create_buffer(VkDevice device, VkPhysicalDevice phy_device, size_t size, VkBufferUsageFlags usage,
-    VkMemoryPropertyFlags property_flags, VkBuffer& buff, VkDeviceMemory& memory);
-
-VkBuffer host_buff;
-VkDeviceMemory host_memory;
-VkBuffer device_buff;
-VkDeviceMemory device_memory;
-
-template<typename T>
-bool to_device(const T* data, size_t size, VkDevice device,
-    VkPhysicalDevice phy_device, VkCommandPool cmd_pool, VkQueue queue)
+class App
 {
-    create_buffer(device, phy_device, size,
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, host_buff, host_memory);
+public:
+    static void init(const char* app_name);
+    static Instance new_instance();
+private:
+    VkApplicationInfo vk_app_info_;
 
-    if (data) {
-        void* mapped_data;
-        vkMapMemory(device, host_memory, 0, size, 0, &mapped_data);
-        memcpy(mapped_data, reinterpret_cast<const void*>(data), size);
-        vkUnmapMemory(device, host_memory);
-    }
-
-    VkMappedMemoryRange mem_range{};
-    mem_range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-    mem_range.size = size;
-    mem_range.offset = 0;
-    mem_range.memory = host_memory;
-    CVK_CHECK_ASSERT(vkFlushMappedMemoryRanges(device, 1, &mem_range));
-    vkUnmapMemory(device, host_memory);
-
-    create_buffer(device, phy_device, size,
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, device_buff, device_memory);
-
-    VkCommandBufferAllocateInfo cmd_alloc_info{};
-    cmd_alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    cmd_alloc_info.commandPool = cmd_pool;
-    cmd_alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    cmd_alloc_info.commandBufferCount = 1;
-
-    VkCommandBuffer cmd_buff;
-    CVK_CHECK_ASSERT(vkAllocateCommandBuffers(device, &cmd_alloc_info, &cmd_buff));
-
-    VkCommandBufferBeginInfo cmd_begin_info{};
-    cmd_begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    CVK_CHECK_ASSERT(vkBeginCommandBuffer(cmd_buff, &cmd_begin_info));
-    VkBufferCopy copy_region{};
-    copy_region.size = size;
-    vkCmdCopyBuffer(cmd_buff, host_buff, device_buff, 1, &copy_region);
-    CVK_CHECK_ASSERT(vkEndCommandBuffer(cmd_buff));
-
-    // submmit
-    VkSubmitInfo submit_info{};
-    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submit_info.commandBufferCount = 1;
-    submit_info.pCommandBuffers = &cmd_buff;
-
-    VkFenceCreateInfo fence_info{};
-    VkFence fence{};
-    fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    fence_info.flags = 0;
-    CVK_CHECK_ASSERT(vkCreateFence(device, &fence_info, nullptr, &fence))
-    CVK_CHECK_ASSERT(vkQueueSubmit(queue, 1, &submit_info, fence))
-    CVK_CHECK_ASSERT(vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX))
-
-    vkDestroyFence(device, fence, nullptr);
-    vkFreeCommandBuffers(device, cmd_pool, 1, &cmd_buff);
-    return true;
-}
-
-
-template<typename T>
-bool to_host(T* data, int size, VkDevice device,
-    VkPhysicalDevice phy_device, VkCommandPool cmd_pool, VkQueue queue)
-{
-    VkCommandBufferAllocateInfo cmd_alloc_info{};
-    cmd_alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    cmd_alloc_info.commandPool = cmd_pool;
-    cmd_alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    cmd_alloc_info.commandBufferCount = 1;
-
-    VkCommandBuffer cmd_buff;
-    CVK_CHECK_ASSERT(vkAllocateCommandBuffers(device, &cmd_alloc_info, &cmd_buff));
-
-    VkCommandBufferBeginInfo begin_info{};
-    begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-
-    CVK_CHECK_ASSERT(vkBeginCommandBuffer(cmd_buff, &begin_info))
-    VkBufferCopy copy_region{};
-    copy_region.size = size;
-    vkCmdCopyBuffer(cmd_buff, device_buff, host_buff, 1, &copy_region);
-    CVK_CHECK_ASSERT(vkEndCommandBuffer(cmd_buff))
-
-    // submmit
-    VkSubmitInfo submit_info{};
-    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submit_info.commandBufferCount = 1;
-    submit_info.pCommandBuffers = &cmd_buff;
-
-    VkFenceCreateInfo fence_info{};
-    VkFence fence{};
-    fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    fence_info.flags = 0;
-    CVK_CHECK_ASSERT(vkCreateFence(device, &fence_info, nullptr, &fence))
-    CVK_CHECK_ASSERT(vkQueueSubmit(queue, 1, &submit_info, fence))
-    CVK_CHECK_ASSERT(vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX))
-
-    vkDestroyFence(device, fence, nullptr);
-    vkFreeCommandBuffers(device, cmd_pool, 1, &cmd_buff);
-
-    void* mapped_data;
-    vkMapMemory(device, host_memory, 0, size, 0, &mapped_data);
-    memcpy(data, mapped_data, size);
-    vkUnmapMemory(device, host_memory);
-    return true;
-}
+    CVK_DEF_SINGLETON(App)
+    App() = default;
+    ~App() = default;
+}; // class App
 
 } // namespace cvk
 
@@ -236,7 +102,14 @@ bool to_host(T* data, int size, VkDevice device,
 #include <cstdlib>
 #include <iostream>
 #include <cstring>
-
+#include <cassert>
+#include <cstddef>
+#include <fstream>
+#include <ios>
+#include <vector>
+#include <mutex>
+#include <cstring>
+#include <iostream>
 
 #ifdef NDEBUG
 #   define CVK_ENABLE_VALIDATION 0
@@ -254,6 +127,17 @@ bool to_host(T* data, int size, VkDevice device,
         }                                                                       \
     } while (0)
 
+#define CVK_CHECK_ASSERT(result)                                                \
+    if ((result) != VK_SUCCESS) {                                               \
+        std::cerr << "Vulkan Failed with error: " << stringify(result) << "\n"; \
+        assert(false);                                                          \
+    }
+
+#define CVK_CHECK_FALSE(result)                                                 \
+    if ((result) != VK_SUCCESS) {                                               \
+        std::cerr << "Vulkan Failed with error: " << stringify(result) << "\n"; \
+        return false;                                                           \
+    }
 
 namespace cvk {
 
@@ -261,68 +145,24 @@ const std::vector<const char*> vck_validation_layers = {
     "VK_LAYER_KHRONOS_validation"
 }; // vck_validation_layers
 
-std::string stringify(VkResult result)
+VkShaderModule load_shader(VkDevice device, const std::string& path);
+
+std::string stringify(VkResult result);
+
+bool create_buffer(VkDevice device, VkPhysicalDevice phy_device, size_t size, VkBufferUsageFlags usage,
+    VkMemoryPropertyFlags property_flags, VkBuffer& buff, VkDeviceMemory& memory);
+
+class Extensions
 {
-#define CVK_MATCH_STRINGIFY(r) case VK_##r: return #r;
+public:
+    static const std::vector<VkExtensionProperties>& get();
+    static bool has(const char* ext_name);
+private:
+    std::vector<VkExtensionProperties> exts_;
 
-    switch (result) {
-    CVK_MATCH_STRINGIFY(SUCCESS)
-    CVK_MATCH_STRINGIFY(NOT_READY)
-    CVK_MATCH_STRINGIFY(TIMEOUT)
-    CVK_MATCH_STRINGIFY(EVENT_SET)
-    CVK_MATCH_STRINGIFY(EVENT_RESET)
-    CVK_MATCH_STRINGIFY(INCOMPLETE)
-    CVK_MATCH_STRINGIFY(ERROR_OUT_OF_HOST_MEMORY)
-    CVK_MATCH_STRINGIFY(ERROR_OUT_OF_DEVICE_MEMORY)
-    CVK_MATCH_STRINGIFY(ERROR_INITIALIZATION_FAILED)
-    CVK_MATCH_STRINGIFY(ERROR_DEVICE_LOST)
-    CVK_MATCH_STRINGIFY(ERROR_MEMORY_MAP_FAILED)
-    CVK_MATCH_STRINGIFY(ERROR_LAYER_NOT_PRESENT)
-    CVK_MATCH_STRINGIFY(ERROR_EXTENSION_NOT_PRESENT)
-    CVK_MATCH_STRINGIFY(ERROR_FEATURE_NOT_PRESENT)
-    CVK_MATCH_STRINGIFY(ERROR_INCOMPATIBLE_DRIVER)
-    CVK_MATCH_STRINGIFY(ERROR_TOO_MANY_OBJECTS)
-    CVK_MATCH_STRINGIFY(ERROR_FORMAT_NOT_SUPPORTED)
-    CVK_MATCH_STRINGIFY(ERROR_FRAGMENTED_POOL)
-    CVK_MATCH_STRINGIFY(ERROR_UNKNOWN)
-    CVK_MATCH_STRINGIFY(ERROR_OUT_OF_POOL_MEMORY)
-    CVK_MATCH_STRINGIFY(ERROR_INVALID_EXTERNAL_HANDLE)
-    CVK_MATCH_STRINGIFY(ERROR_FRAGMENTATION)
-    CVK_MATCH_STRINGIFY(ERROR_INVALID_OPAQUE_CAPTURE_ADDRESS)
-    CVK_MATCH_STRINGIFY(PIPELINE_COMPILE_REQUIRED)
-    CVK_MATCH_STRINGIFY(ERROR_NOT_PERMITTED)
-    CVK_MATCH_STRINGIFY(ERROR_SURFACE_LOST_KHR)
-    CVK_MATCH_STRINGIFY(ERROR_NATIVE_WINDOW_IN_USE_KHR)
-    CVK_MATCH_STRINGIFY(SUBOPTIMAL_KHR)
-    CVK_MATCH_STRINGIFY(ERROR_OUT_OF_DATE_KHR)
-    CVK_MATCH_STRINGIFY(ERROR_INCOMPATIBLE_DISPLAY_KHR)
-    CVK_MATCH_STRINGIFY(ERROR_VALIDATION_FAILED_EXT)
-    CVK_MATCH_STRINGIFY(ERROR_INVALID_SHADER_NV)
-    CVK_MATCH_STRINGIFY(ERROR_IMAGE_USAGE_NOT_SUPPORTED_KHR)
-    CVK_MATCH_STRINGIFY(ERROR_VIDEO_PICTURE_LAYOUT_NOT_SUPPORTED_KHR)
-    CVK_MATCH_STRINGIFY(ERROR_VIDEO_PROFILE_OPERATION_NOT_SUPPORTED_KHR)
-    CVK_MATCH_STRINGIFY(ERROR_VIDEO_PROFILE_FORMAT_NOT_SUPPORTED_KHR)
-    CVK_MATCH_STRINGIFY(ERROR_VIDEO_PROFILE_CODEC_NOT_SUPPORTED_KHR)
-    CVK_MATCH_STRINGIFY(ERROR_VIDEO_STD_VERSION_NOT_SUPPORTED_KHR)
-    CVK_MATCH_STRINGIFY(ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT)
-    CVK_MATCH_STRINGIFY(ERROR_FULL_SCREEN_EXCLUSIVE_MODE_LOST_EXT)
-    CVK_MATCH_STRINGIFY(THREAD_IDLE_KHR)
-    CVK_MATCH_STRINGIFY(THREAD_DONE_KHR)
-    CVK_MATCH_STRINGIFY(OPERATION_DEFERRED_KHR)
-    CVK_MATCH_STRINGIFY(OPERATION_NOT_DEFERRED_KHR)
-    CVK_MATCH_STRINGIFY(ERROR_INVALID_VIDEO_STD_PARAMETERS_KHR)
-    CVK_MATCH_STRINGIFY(ERROR_COMPRESSION_EXHAUSTED_EXT)
-    CVK_MATCH_STRINGIFY(INCOMPATIBLE_SHADER_BINARY_EXT)
-    CVK_MATCH_STRINGIFY(PIPELINE_BINARY_MISSING_KHR)
-    CVK_MATCH_STRINGIFY(ERROR_NOT_ENOUGH_SPACE_KHR)
-    default: return "UNKNOWN ERROR";
-    }
-#undef CVK_MATCH_STRINGIFY
-}
-
-App::App() {}
-
-App::~App() {}
+    CVK_DEF_SINGLETON(Extensions)
+    Extensions();
+}; // class Extensions
 
 void App::init(const char* app_name)
 {
@@ -335,7 +175,7 @@ void App::init(const char* app_name)
     ins->vk_app_info_.apiVersion = VK_API_VERSION_1_4;
 }
 
-bool App::create_instance(VkInstance& vk_instance)
+Instance App::new_instance()
 {
     auto ins{instance()};
 
@@ -349,25 +189,312 @@ bool App::create_instance(VkInstance& vk_instance)
 #else // CVK_ENABLE_VALIDATION
     create_info.enabledLayerCount = 0;
 #endif // CVK_ENABLE_VALIDATION
-    if (vkCreateInstance(&create_info, nullptr, &vk_instance) != VK_SUCCESS) {
-        return false;
+
+    VkInstance vk_instance;
+    CVK_CHECK_ASSERT(vkCreateInstance(&create_info, nullptr, &vk_instance))
+    return Instance(vk_instance);
+}
+
+Instance::Instance(VkInstance vk_instance) : vk_instance_(vk_instance)
+{
+    PhysicalDevice physical_device_creator;
+    Device device_creator;
+
+    physical_device_creator.get(vk_instance, phy_device_, queue_index_);
+    device_creator.create(phy_device_, queue_index_, device_, queue_);
+    init_command_pool(device_, queue_index_, cmd_pool_);
+    // VkBuffer host_buff_;
+    // VkDeviceMemory host_memory_;
+    // VkBuffer device_buff_;
+    // VkDeviceMemory device_memory_;
+}
+
+Instance::~Instance()
+{
+    destroy();
+}
+
+void Instance::destroy()
+{
+
+}
+
+bool Instance::to_device(const void* data, size_t size)
+{
+    create_buffer(device_, phy_device_, size,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, host_buff_, host_memory_);
+
+    if (data) {
+        void* mapped_data;
+        vkMapMemory(device_, host_memory_, 0, size, 0, &mapped_data);
+        memcpy(mapped_data, reinterpret_cast<const void*>(data), size);
+        vkUnmapMemory(device_, host_memory_);
     }
 
-    ins->vk_ins_.push_back(vk_instance);
+    VkMappedMemoryRange mem_range{};
+    mem_range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+    mem_range.size = size;
+    mem_range.offset = 0;
+    mem_range.memory = host_memory_;
+    CVK_CHECK_ASSERT(vkFlushMappedMemoryRanges(device_, 1, &mem_range));
+    vkUnmapMemory(device_, host_memory_);
+
+    create_buffer(device_, phy_device_, size,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, device_buff_, device_memory_);
+
+    VkCommandBufferAllocateInfo cmd_alloc_info{};
+    cmd_alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    cmd_alloc_info.commandPool = cmd_pool_;
+    cmd_alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cmd_alloc_info.commandBufferCount = 1;
+
+    VkCommandBuffer cmd_buff;
+    CVK_CHECK_ASSERT(vkAllocateCommandBuffers(device_, &cmd_alloc_info, &cmd_buff));
+
+    VkCommandBufferBeginInfo cmd_begin_info{};
+    cmd_begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    CVK_CHECK_ASSERT(vkBeginCommandBuffer(cmd_buff, &cmd_begin_info));
+    VkBufferCopy copy_region{};
+    copy_region.size = size;
+    vkCmdCopyBuffer(cmd_buff, host_buff_, device_buff_, 1, &copy_region);
+    CVK_CHECK_ASSERT(vkEndCommandBuffer(cmd_buff));
+
+    // submmit
+    VkSubmitInfo submit_info{};
+    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit_info.commandBufferCount = 1;
+    submit_info.pCommandBuffers = &cmd_buff;
+
+    VkFenceCreateInfo fence_info{};
+    VkFence fence{};
+    fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    fence_info.flags = 0;
+    CVK_CHECK_ASSERT(vkCreateFence(device_, &fence_info, nullptr, &fence))
+    CVK_CHECK_ASSERT(vkQueueSubmit(queue_, 1, &submit_info, fence))
+    CVK_CHECK_ASSERT(vkWaitForFences(device_, 1, &fence, VK_TRUE, UINT64_MAX))
+
+    vkDestroyFence(device_, fence, nullptr);
+    vkFreeCommandBuffers(device_, cmd_pool_, 1, &cmd_buff);
     return true;
 }
 
-void App::destroy_instance(const VkInstance& instance)
+bool Instance::to_host(void* data, size_t size)
 {
-    vkDestroyInstance(instance, nullptr);
+    VkCommandBufferAllocateInfo cmd_alloc_info{};
+    cmd_alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    cmd_alloc_info.commandPool = cmd_pool_;
+    cmd_alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cmd_alloc_info.commandBufferCount = 1;
+
+    VkCommandBuffer cmd_buff;
+    CVK_CHECK_ASSERT(vkAllocateCommandBuffers(device_, &cmd_alloc_info, &cmd_buff));
+
+    VkCommandBufferBeginInfo begin_info{};
+    begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+
+    CVK_CHECK_ASSERT(vkBeginCommandBuffer(cmd_buff, &begin_info))
+    VkBufferCopy copy_region{};
+    copy_region.size = size;
+    vkCmdCopyBuffer(cmd_buff, device_buff_, host_buff_, 1, &copy_region);
+    CVK_CHECK_ASSERT(vkEndCommandBuffer(cmd_buff))
+
+    // submmit
+    VkSubmitInfo submit_info{};
+    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit_info.commandBufferCount = 1;
+    submit_info.pCommandBuffers = &cmd_buff;
+
+    VkFenceCreateInfo fence_info{};
+    VkFence fence{};
+    fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    fence_info.flags = 0;
+    CVK_CHECK_ASSERT(vkCreateFence(device_, &fence_info, nullptr, &fence))
+    CVK_CHECK_ASSERT(vkQueueSubmit(queue_, 1, &submit_info, fence))
+    CVK_CHECK_ASSERT(vkWaitForFences(device_, 1, &fence, VK_TRUE, UINT64_MAX))
+
+    vkDestroyFence(device_, fence, nullptr);
+    vkFreeCommandBuffers(device_, cmd_pool_, 1, &cmd_buff);
+
+    void* mapped_data;
+    vkMapMemory(device_, host_memory_, 0, size, 0, &mapped_data);
+    memcpy(data, mapped_data, size);
+    vkUnmapMemory(device_, host_memory_);
+    return true;
 }
 
-void App::destroy_all_instance()
+bool Instance::execute(const std::string& shader_path)
 {
-    auto ins{instance()};
-    for (const auto& vk_ins: ins->vk_ins_) {
-        destroy_instance(vk_ins);
+    VkDescriptorPool desc_pool{};
+    VkDescriptorSetLayout desc_set_layout{};
+    VkPipelineLayout pipeline_layout{};
+    VkDescriptorSet desc_set{};
+    VkPipelineCache pipeline_cache{};
+    VkPipeline comp_pipeline{};
+
+    struct SpecializationData {
+        uint32_t num_element;
+    }; // struct SpecializationData
+
+    std::vector<VkDescriptorPoolSize> pool_sizes{
+        VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .descriptorCount = 1}
+    };
+    VkDescriptorPoolCreateInfo pool_create_info{};
+    pool_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    pool_create_info.poolSizeCount = static_cast<uint32_t>(pool_sizes.size());
+    pool_create_info.pPoolSizes = pool_sizes.data();
+    pool_create_info.maxSets = 1;
+    CVK_CHECK_ASSERT(vkCreateDescriptorPool(device_, &pool_create_info, nullptr, &desc_pool))
+
+    std::vector<VkDescriptorSetLayoutBinding> set_layout_bindings{
+        VkDescriptorSetLayoutBinding{
+            .binding = 0,
+            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            .descriptorCount = 1,
+            .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT
+        }
+    };
+
+    VkDescriptorSetLayoutCreateInfo layout_create_info{};
+    layout_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    layout_create_info.bindingCount = static_cast<uint32_t>(set_layout_bindings.size());
+    layout_create_info.pBindings = set_layout_bindings.data();
+    CVK_CHECK_ASSERT(vkCreateDescriptorSetLayout(device_, &layout_create_info, nullptr, &desc_set_layout))
+
+    VkPipelineLayoutCreateInfo pipeline_create_info{};
+    pipeline_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pipeline_create_info.setLayoutCount = 1;
+    pipeline_create_info.pSetLayouts = &desc_set_layout;
+    CVK_CHECK_ASSERT(vkCreatePipelineLayout(device_, &pipeline_create_info, nullptr, &pipeline_layout))
+
+    VkDescriptorSetAllocateInfo desc_alloc_info{};
+    desc_alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    desc_alloc_info.descriptorSetCount = 1;
+    desc_alloc_info.descriptorPool = desc_pool;
+    desc_alloc_info.pSetLayouts = &desc_set_layout;
+    CVK_CHECK_ASSERT(vkAllocateDescriptorSets(device_, &desc_alloc_info, &desc_set))
+
+    VkDescriptorBufferInfo desc_buff_info{};
+    desc_buff_info.range = VK_WHOLE_SIZE;
+    desc_buff_info.offset = 0;
+    desc_buff_info.buffer = device_buff_;
+    std::vector<VkWriteDescriptorSet> write_desc_set{
+        VkWriteDescriptorSet{
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = desc_set,
+            .dstBinding = 0,
+            .descriptorCount = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            .pBufferInfo = &desc_buff_info
+        }
+    };
+    vkUpdateDescriptorSets(device_, write_desc_set.size(), write_desc_set.data(), 0, nullptr);
+
+    VkPipelineCacheCreateInfo pipeline_cache_create_info{};
+    pipeline_cache_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
+    CVK_CHECK_ASSERT(vkCreatePipelineCache(device_, &pipeline_cache_create_info, nullptr, &pipeline_cache))
+
+    VkSpecializationMapEntry spec_map_entry{};
+    spec_map_entry.constantID = 0;
+    spec_map_entry.offset = 0;
+    spec_map_entry.size = sizeof(uint32_t);
+
+    VkSpecializationInfo spec_info{};
+    SpecializationData spec_data{.num_element = 8};
+    spec_info.dataSize = sizeof(spec_data);
+    spec_info.pData = &spec_data;
+    spec_info.mapEntryCount = 1;
+    spec_info.pMapEntries = &spec_map_entry;
+
+    VkPipelineShaderStageCreateInfo shader_stage_create_info{};
+    VkShaderModule shader_module{load_shader(device_, shader_path)};
+    shader_stage_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    shader_stage_create_info.module = shader_module;
+    shader_stage_create_info.pSpecializationInfo = &spec_info;
+    shader_stage_create_info.pName = "main";
+    shader_stage_create_info.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+
+    VkComputePipelineCreateInfo comp_pipeline_create_info{};
+    comp_pipeline_create_info.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+    comp_pipeline_create_info.stage = shader_stage_create_info;
+    comp_pipeline_create_info.layout = pipeline_layout;
+    comp_pipeline_create_info.flags = 0;
+    CVK_CHECK_ASSERT(vkCreateComputePipelines(device_, pipeline_cache, 1, &comp_pipeline_create_info, nullptr, &comp_pipeline))
+
+    VkCommandBuffer cmd_buff;
+    VkCommandBufferAllocateInfo cmd_buff_alloc_info{};
+    cmd_buff_alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    cmd_buff_alloc_info.commandBufferCount = 1;
+    cmd_buff_alloc_info.commandPool = cmd_pool_;
+    cmd_buff_alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    CVK_CHECK_ASSERT(vkAllocateCommandBuffers(device_, &cmd_buff_alloc_info, &cmd_buff))
+
+    VkFence fence;
+    VkFenceCreateInfo fence_create_info{};
+    fence_create_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    fence_create_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+    CVK_CHECK_ASSERT(vkCreateFence(device_, &fence_create_info, nullptr, &fence))
+
+    VkCommandBufferBeginInfo cmd_begin_info{};
+    cmd_begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    CVK_CHECK_ASSERT(vkBeginCommandBuffer(cmd_buff, &cmd_begin_info))
+
+    VkBufferMemoryBarrier mem_buff_barrier{};
+    mem_buff_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+    mem_buff_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    mem_buff_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    mem_buff_barrier.buffer = device_buff_;
+    mem_buff_barrier.size = VK_WHOLE_SIZE;
+    mem_buff_barrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
+    mem_buff_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+    vkCmdPipelineBarrier(cmd_buff, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0,
+        0, nullptr,
+        1, &mem_buff_barrier,
+        0, nullptr);
+
+    vkCmdBindPipeline(cmd_buff, VK_PIPELINE_BIND_POINT_COMPUTE, comp_pipeline);
+    vkCmdBindDescriptorSets(cmd_buff, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_layout, 0, 1, &desc_set, 0, nullptr);
+    vkCmdDispatch(cmd_buff, 8, 1, 1);
+
+    // mem_buff_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    // mem_buff_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    // mem_buff_barrier.buffer = device_buff;
+    // mem_buff_barrier.size = VK_WHOLE_SIZE;
+    // mem_buff_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    // mem_buff_barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    // vkCmdPipelineBarrier(cmd_buff, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
+    //     0, nullptr,
+    //     1, &mem_buff_barrier,
+    //     0, nullptr);
+    CVK_CHECK_ASSERT(vkEndCommandBuffer(cmd_buff))
+    vkResetFences(device_, 1, &fence);
+
+
+    const VkPipelineStageFlags wait_stage_mask{VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT};
+    VkSubmitInfo submit_info{};
+    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit_info.commandBufferCount = 1;
+    submit_info.pCommandBuffers = &cmd_buff;
+    submit_info.pWaitDstStageMask = &wait_stage_mask;
+    CVK_CHECK_ASSERT(vkQueueSubmit(queue_, 1, &submit_info, fence))
+    CVK_CHECK_ASSERT(vkWaitForFences(device_, 1, &fence, VK_TRUE, UINT64_MAX))
+
+    return true;
+}
+
+bool Instance::init_command_pool(VkDevice device, uint32_t queue_index, VkCommandPool& cmd_pool)
+{
+    VkCommandPoolCreateInfo create_info{};
+    create_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    create_info.queueFamilyIndex = queue_index;
+    create_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+
+    if (vkCreateCommandPool(device, &create_info, nullptr, &cmd_pool) != VK_SUCCESS) {
+        return false;
     }
+    return true;
 }
 
 Extensions::Extensions()
@@ -394,11 +521,9 @@ bool Extensions::has(const char* ext_name)
     return false;
 }
 
+PhysicalDevice::PhysicalDevice() {}
 
-PhyDevice::PhyDevice() {}
-
-
-bool PhyDevice::get(const VkInstance& vk_ins, VkPhysicalDevice& device, uint32_t& que_family_index)
+bool PhysicalDevice::get(const VkInstance& vk_ins, VkPhysicalDevice& device, uint32_t& que_family_index)
 {
     uint32_t count{0};
     vkEnumeratePhysicalDevices(vk_ins, &count, nullptr);
@@ -421,7 +546,7 @@ bool PhyDevice::get(const VkInstance& vk_ins, VkPhysicalDevice& device, uint32_t
     return false;
 }
 
-bool PhyDevice::property_available(VkPhysicalDevice device)
+bool PhysicalDevice::property_available(VkPhysicalDevice device)
 {
     if (device == VK_NULL_HANDLE) {
         return false;
@@ -436,7 +561,7 @@ bool PhyDevice::property_available(VkPhysicalDevice device)
     return true;
 }
 
-std::optional<uint32_t> PhyDevice::find_available_queue(VkPhysicalDevice device)
+std::optional<uint32_t> PhysicalDevice::find_available_queue(VkPhysicalDevice device)
 {
     if (device == VK_NULL_HANDLE) {
         return false;
@@ -459,7 +584,7 @@ std::optional<uint32_t> PhyDevice::find_available_queue(VkPhysicalDevice device)
     return result;
 }
 
-void PhyDevice::properties(VkPhysicalDevice device, VkPhysicalDeviceProperties& properties)
+void PhysicalDevice::properties(VkPhysicalDevice device, VkPhysicalDeviceProperties& properties)
 {
     vkGetPhysicalDeviceProperties(device, &properties);
 }
@@ -504,19 +629,6 @@ void Device::destroy(VkDevice device)
     if (device != VK_NULL_HANDLE) {
         vkDestroyDevice(device, nullptr);
     }
-}
-
-bool CommandPool::create(VkDevice device, uint32_t queue_index, VkCommandPool& cmd_pool)
-{
-    VkCommandPoolCreateInfo create_info{};
-    create_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    create_info.queueFamilyIndex = queue_index;
-    create_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-
-    if (vkCreateCommandPool(device, &create_info, nullptr, &cmd_pool) != VK_SUCCESS) {
-        return false;
-    }
-    return true;
 }
 
 bool create_buffer(VkDevice device, VkPhysicalDevice phy_device, size_t size, VkBufferUsageFlags usage,
@@ -585,163 +697,63 @@ VkShaderModule load_shader(VkDevice device, const std::string& path)
     return shader;
 }
 
-bool execute(VkDevice device, VkQueue queue, VkShaderModule shader, VkCommandPool cmd_pool, uint32_t num_spec_element)
+std::string stringify(VkResult result)
 {
-    VkDescriptorPool desc_pool{};
-    VkDescriptorSetLayout desc_set_layout{};
-    VkPipelineLayout pipeline_layout{};
-    VkDescriptorSet desc_set{};
-    VkPipelineCache pipeline_cache{};
-    VkPipeline comp_pipeline{};
+#define CVK_MATCH_STRINGIFY(r) case VK_##r: return #r;
 
-    struct SpecializationData {
-        uint32_t num_element;
-    }; // struct SpecializationData
-
-    std::vector<VkDescriptorPoolSize> pool_sizes{
-        VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .descriptorCount = 1}
-    };
-    VkDescriptorPoolCreateInfo pool_create_info{};
-    pool_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    pool_create_info.poolSizeCount = static_cast<uint32_t>(pool_sizes.size());
-    pool_create_info.pPoolSizes = pool_sizes.data();
-    pool_create_info.maxSets = 1;
-    CVK_CHECK_ASSERT(vkCreateDescriptorPool(device, &pool_create_info, nullptr, &desc_pool))
-
-    std::vector<VkDescriptorSetLayoutBinding> set_layout_bindings{
-        VkDescriptorSetLayoutBinding{
-            .binding = 0,
-            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-            .descriptorCount = 1,
-            .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT
-        }
-    };
-
-    VkDescriptorSetLayoutCreateInfo layout_create_info{};
-    layout_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layout_create_info.bindingCount = static_cast<uint32_t>(set_layout_bindings.size());
-    layout_create_info.pBindings = set_layout_bindings.data();
-    CVK_CHECK_ASSERT(vkCreateDescriptorSetLayout(device, &layout_create_info, nullptr, &desc_set_layout))
-
-    VkPipelineLayoutCreateInfo pipeline_create_info{};
-    pipeline_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipeline_create_info.setLayoutCount = 1;
-    pipeline_create_info.pSetLayouts = &desc_set_layout;
-    CVK_CHECK_ASSERT(vkCreatePipelineLayout(device, &pipeline_create_info, nullptr, &pipeline_layout))
-
-    VkDescriptorSetAllocateInfo desc_alloc_info{};
-    desc_alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    desc_alloc_info.descriptorSetCount = 1;
-    desc_alloc_info.descriptorPool = desc_pool;
-    desc_alloc_info.pSetLayouts = &desc_set_layout;
-    CVK_CHECK_ASSERT(vkAllocateDescriptorSets(device, &desc_alloc_info, &desc_set))
-
-    VkDescriptorBufferInfo desc_buff_info{};
-    desc_buff_info.range = VK_WHOLE_SIZE;
-    desc_buff_info.offset = 0;
-    desc_buff_info.buffer = device_buff;
-    std::vector<VkWriteDescriptorSet> write_desc_set{
-        VkWriteDescriptorSet{
-            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet = desc_set,
-            .dstBinding = 0,
-            .descriptorCount = 1,
-            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-            .pBufferInfo = &desc_buff_info
-        }
-    };
-    vkUpdateDescriptorSets(device, write_desc_set.size(), write_desc_set.data(), 0, nullptr);
-
-    VkPipelineCacheCreateInfo pipeline_cache_create_info{};
-    pipeline_cache_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
-    CVK_CHECK_ASSERT(vkCreatePipelineCache(device, &pipeline_cache_create_info, nullptr, &pipeline_cache))
-
-    VkSpecializationMapEntry spec_map_entry{};
-    spec_map_entry.constantID = 0;
-    spec_map_entry.offset = 0;
-    spec_map_entry.size = sizeof(uint32_t);
-
-    VkSpecializationInfo spec_info{};
-    SpecializationData spec_data{.num_element = num_spec_element};
-    spec_info.dataSize = sizeof(spec_data);
-    spec_info.pData = &spec_data;
-    spec_info.mapEntryCount = 1;
-    spec_info.pMapEntries = &spec_map_entry;
-
-    VkPipelineShaderStageCreateInfo shader_stage_create_info{};
-    shader_stage_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    shader_stage_create_info.module = shader;
-    shader_stage_create_info.pSpecializationInfo = &spec_info;
-    shader_stage_create_info.pName = "main";
-    shader_stage_create_info.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-
-    VkComputePipelineCreateInfo comp_pipeline_create_info{};
-    comp_pipeline_create_info.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-    comp_pipeline_create_info.stage = shader_stage_create_info;
-    comp_pipeline_create_info.layout = pipeline_layout;
-    comp_pipeline_create_info.flags = 0;
-    CVK_CHECK_ASSERT(vkCreateComputePipelines(device, pipeline_cache, 1, &comp_pipeline_create_info, nullptr, &comp_pipeline))
-
-    VkCommandBuffer cmd_buff;
-    VkCommandBufferAllocateInfo cmd_buff_alloc_info{};
-    cmd_buff_alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    cmd_buff_alloc_info.commandBufferCount = 1;
-    cmd_buff_alloc_info.commandPool = cmd_pool;
-    cmd_buff_alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    CVK_CHECK_ASSERT(vkAllocateCommandBuffers(device, &cmd_buff_alloc_info, &cmd_buff))
-
-    VkFence fence;
-    VkFenceCreateInfo fence_create_info{};
-    fence_create_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    fence_create_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-    CVK_CHECK_ASSERT(vkCreateFence(device, &fence_create_info, nullptr, &fence))
-
-    VkCommandBufferBeginInfo cmd_begin_info{};
-    cmd_begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    CVK_CHECK_ASSERT(vkBeginCommandBuffer(cmd_buff, &cmd_begin_info))
-
-    VkBufferMemoryBarrier mem_buff_barrier{};
-    mem_buff_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-    mem_buff_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    mem_buff_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    mem_buff_barrier.buffer = device_buff;
-    mem_buff_barrier.size = VK_WHOLE_SIZE;
-    mem_buff_barrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
-    mem_buff_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
-    vkCmdPipelineBarrier(cmd_buff, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0,
-        0, nullptr,
-        1, &mem_buff_barrier,
-        0, nullptr);
-
-    vkCmdBindPipeline(cmd_buff, VK_PIPELINE_BIND_POINT_COMPUTE, comp_pipeline);
-    vkCmdBindDescriptorSets(cmd_buff, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_layout, 0, 1, &desc_set, 0, nullptr);
-    vkCmdDispatch(cmd_buff, num_spec_element, 1, 1);
-
-    // mem_buff_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    // mem_buff_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    // mem_buff_barrier.buffer = device_buff;
-    // mem_buff_barrier.size = VK_WHOLE_SIZE;
-    // mem_buff_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    // mem_buff_barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-    // vkCmdPipelineBarrier(cmd_buff, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
-    //     0, nullptr,
-    //     1, &mem_buff_barrier,
-    //     0, nullptr);
-    CVK_CHECK_ASSERT(vkEndCommandBuffer(cmd_buff))
-    vkResetFences(device, 1, &fence);
-
-
-    const VkPipelineStageFlags wait_stage_mask{VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT};
-    VkSubmitInfo submit_info{};
-    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submit_info.commandBufferCount = 1;
-    submit_info.pCommandBuffers = &cmd_buff;
-    submit_info.pWaitDstStageMask = &wait_stage_mask;
-    CVK_CHECK_ASSERT(vkQueueSubmit(queue, 1, &submit_info, fence))
-    CVK_CHECK_ASSERT(vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX))
-
-    return true;
+    switch (result) {
+    CVK_MATCH_STRINGIFY(SUCCESS)
+    CVK_MATCH_STRINGIFY(NOT_READY)
+    CVK_MATCH_STRINGIFY(TIMEOUT)
+    CVK_MATCH_STRINGIFY(EVENT_SET)
+    CVK_MATCH_STRINGIFY(EVENT_RESET)
+    CVK_MATCH_STRINGIFY(INCOMPLETE)
+    CVK_MATCH_STRINGIFY(ERROR_OUT_OF_HOST_MEMORY)
+    CVK_MATCH_STRINGIFY(ERROR_OUT_OF_DEVICE_MEMORY)
+    CVK_MATCH_STRINGIFY(ERROR_INITIALIZATION_FAILED)
+    CVK_MATCH_STRINGIFY(ERROR_DEVICE_LOST)
+    CVK_MATCH_STRINGIFY(ERROR_MEMORY_MAP_FAILED)
+    CVK_MATCH_STRINGIFY(ERROR_LAYER_NOT_PRESENT)
+    CVK_MATCH_STRINGIFY(ERROR_EXTENSION_NOT_PRESENT)
+    CVK_MATCH_STRINGIFY(ERROR_FEATURE_NOT_PRESENT)
+    CVK_MATCH_STRINGIFY(ERROR_INCOMPATIBLE_DRIVER)
+    CVK_MATCH_STRINGIFY(ERROR_TOO_MANY_OBJECTS)
+    CVK_MATCH_STRINGIFY(ERROR_FORMAT_NOT_SUPPORTED)
+    CVK_MATCH_STRINGIFY(ERROR_FRAGMENTED_POOL)
+    CVK_MATCH_STRINGIFY(ERROR_UNKNOWN)
+    CVK_MATCH_STRINGIFY(ERROR_OUT_OF_POOL_MEMORY)
+    CVK_MATCH_STRINGIFY(ERROR_INVALID_EXTERNAL_HANDLE)
+    CVK_MATCH_STRINGIFY(ERROR_FRAGMENTATION)
+    CVK_MATCH_STRINGIFY(ERROR_INVALID_OPAQUE_CAPTURE_ADDRESS)
+    CVK_MATCH_STRINGIFY(PIPELINE_COMPILE_REQUIRED)
+    CVK_MATCH_STRINGIFY(ERROR_NOT_PERMITTED)
+    CVK_MATCH_STRINGIFY(ERROR_SURFACE_LOST_KHR)
+    CVK_MATCH_STRINGIFY(ERROR_NATIVE_WINDOW_IN_USE_KHR)
+    CVK_MATCH_STRINGIFY(SUBOPTIMAL_KHR)
+    CVK_MATCH_STRINGIFY(ERROR_OUT_OF_DATE_KHR)
+    CVK_MATCH_STRINGIFY(ERROR_INCOMPATIBLE_DISPLAY_KHR)
+    CVK_MATCH_STRINGIFY(ERROR_VALIDATION_FAILED_EXT)
+    CVK_MATCH_STRINGIFY(ERROR_INVALID_SHADER_NV)
+    CVK_MATCH_STRINGIFY(ERROR_IMAGE_USAGE_NOT_SUPPORTED_KHR)
+    CVK_MATCH_STRINGIFY(ERROR_VIDEO_PICTURE_LAYOUT_NOT_SUPPORTED_KHR)
+    CVK_MATCH_STRINGIFY(ERROR_VIDEO_PROFILE_OPERATION_NOT_SUPPORTED_KHR)
+    CVK_MATCH_STRINGIFY(ERROR_VIDEO_PROFILE_FORMAT_NOT_SUPPORTED_KHR)
+    CVK_MATCH_STRINGIFY(ERROR_VIDEO_PROFILE_CODEC_NOT_SUPPORTED_KHR)
+    CVK_MATCH_STRINGIFY(ERROR_VIDEO_STD_VERSION_NOT_SUPPORTED_KHR)
+    CVK_MATCH_STRINGIFY(ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT)
+    CVK_MATCH_STRINGIFY(ERROR_FULL_SCREEN_EXCLUSIVE_MODE_LOST_EXT)
+    CVK_MATCH_STRINGIFY(THREAD_IDLE_KHR)
+    CVK_MATCH_STRINGIFY(THREAD_DONE_KHR)
+    CVK_MATCH_STRINGIFY(OPERATION_DEFERRED_KHR)
+    CVK_MATCH_STRINGIFY(OPERATION_NOT_DEFERRED_KHR)
+    CVK_MATCH_STRINGIFY(ERROR_INVALID_VIDEO_STD_PARAMETERS_KHR)
+    CVK_MATCH_STRINGIFY(ERROR_COMPRESSION_EXHAUSTED_EXT)
+    CVK_MATCH_STRINGIFY(INCOMPATIBLE_SHADER_BINARY_EXT)
+    CVK_MATCH_STRINGIFY(PIPELINE_BINARY_MISSING_KHR)
+    CVK_MATCH_STRINGIFY(ERROR_NOT_ENOUGH_SPACE_KHR)
+    default: return "UNKNOWN ERROR";
+    }
+#undef CVK_MATCH_STRINGIFY
 }
 
 } // namespace cvk
