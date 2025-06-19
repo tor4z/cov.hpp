@@ -41,7 +41,7 @@ int main()
 
     VkCommandPool cmd_pool;
     if (!cvk::CommandPool::create(device, queue_index, cmd_pool)) {
-        std::cerr << "Failed to create command pool";
+        std::cerr << "Failed to create command pool\n";
         return 1;
     }
 

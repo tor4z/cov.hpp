@@ -3,6 +3,8 @@
 
 #include <cassert>
 #include <cstddef>
+#include <fstream>
+#include <ios>
 #include <optional>
 #include <vector>
 #include <mutex>
@@ -556,6 +558,144 @@ bool create_buffer(VkDevice device, VkPhysicalDevice phy_device, size_t size, Vk
 
     CVK_CHECK_ASSERT(vkAllocateMemory(device, &mem_alloc_info, nullptr, &memory))
     CVK_CHECK_ASSERT(vkBindBufferMemory(device, buff, memory, 0))
+    return true;
+}
+
+
+VkShaderModule load_shader(VkDevice device, const std::string& path)
+{
+    VkShaderModule shader{VK_NULL_HANDLE};
+    std::ifstream ifs(path, std::ios::in | std::ios::binary);
+    if (ifs.is_open()) {
+        ifs.seekg(0, std::ios::end);
+        const auto size{ifs.tellg()};
+        char* data{new char[size]};
+        ifs.seekg(0, std::ios::beg);
+        ifs.read(data, size);
+
+        VkShaderModuleCreateInfo create_info{};
+        create_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+        create_info.codeSize = size;
+        create_info.pCode = reinterpret_cast<uint32_t*>(data);
+        CVK_CHECK_ASSERT(vkCreateShaderModule(device, &create_info, nullptr, &shader))
+
+        delete [] data;
+    }
+
+    return shader;
+}
+
+bool execute(VkDevice device, VkQueue queue, VkShaderModule shader, VkCommandPool cmd_pool, uint32_t num_spec_element)
+{
+    VkDescriptorPool desc_pool{};
+    VkDescriptorSetLayout desc_set_layout{};
+    VkPipelineLayout pipeline_layout{};
+    VkDescriptorSet desc_set{};
+    VkPipelineCache pipeline_cache{};
+    VkPipeline comp_pipeline{};
+
+    struct SpecializationData {
+        uint32_t num_element;
+    }; // struct SpecializationData
+
+    std::vector<VkDescriptorPoolSize> pool_sizes{
+        VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .descriptorCount = 1}
+    };
+    VkDescriptorPoolCreateInfo pool_create_info{};
+    pool_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    pool_create_info.poolSizeCount = static_cast<uint32_t>(pool_sizes.size());
+    pool_create_info.pPoolSizes = pool_sizes.data();
+    pool_create_info.maxSets = 1;
+    CVK_CHECK_ASSERT(vkCreateDescriptorPool(device, &pool_create_info, nullptr, &desc_pool))
+
+    std::vector<VkDescriptorSetLayoutBinding> set_layout_bindings{
+        VkDescriptorSetLayoutBinding{
+            .binding = 0,
+            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            .descriptorCount = 1,
+            .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT
+        }
+    };
+
+    VkDescriptorSetLayoutCreateInfo layout_create_info{};
+    layout_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    layout_create_info.bindingCount = static_cast<uint32_t>(set_layout_bindings.size());
+    layout_create_info.pBindings = set_layout_bindings.data();
+    CVK_CHECK_ASSERT(vkCreateDescriptorSetLayout(device, &layout_create_info, nullptr, &desc_set_layout))
+
+    VkPipelineLayoutCreateInfo pipeline_create_info{};
+    pipeline_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pipeline_create_info.setLayoutCount = 1;
+    pipeline_create_info.pSetLayouts = &desc_set_layout;
+    CVK_CHECK_ASSERT(vkCreatePipelineLayout(device, &pipeline_create_info, nullptr, &pipeline_layout))
+
+    VkDescriptorSetAllocateInfo desc_alloc_info{};
+    desc_alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    desc_alloc_info.descriptorSetCount = 1;
+    desc_alloc_info.descriptorPool = desc_pool;
+    desc_alloc_info.pSetLayouts = &desc_set_layout;
+    CVK_CHECK_ASSERT(vkAllocateDescriptorSets(device, &desc_alloc_info, &desc_set))
+
+    VkDescriptorBufferInfo desc_buff_info{};
+    desc_buff_info.range = VK_WHOLE_SIZE;
+    desc_buff_info.offset = 0;
+    desc_buff_info.buffer = device_buff;
+    std::vector<VkWriteDescriptorSet> write_desc_set{
+        VkWriteDescriptorSet{
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = desc_set,
+            .dstBinding = 0,
+            .descriptorCount = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            .pBufferInfo = &desc_buff_info
+        }
+    };
+    vkUpdateDescriptorSets(device, write_desc_set.size(), write_desc_set.data(), 0, nullptr);
+
+    VkPipelineCacheCreateInfo pipeline_cache_create_info{};
+    pipeline_cache_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
+    CVK_CHECK_ASSERT(vkCreatePipelineCache(device, &pipeline_cache_create_info, nullptr, &pipeline_cache))
+
+    VkSpecializationMapEntry spec_map_entry{};
+    spec_map_entry.constantID = 0;
+    spec_map_entry.offset = 0;
+    spec_map_entry.size = sizeof(uint32_t);
+
+    VkSpecializationInfo spec_info{};
+    SpecializationData spec_data{.num_element = num_spec_element};
+    spec_info.dataSize = sizeof(spec_data);
+    spec_info.pData = &spec_data;
+    spec_info.mapEntryCount = 1;
+    spec_info.pMapEntries = &spec_map_entry;
+
+    VkPipelineShaderStageCreateInfo shader_stage_create_info{};
+    shader_stage_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    shader_stage_create_info.module = shader;
+    shader_stage_create_info.pSpecializationInfo = &spec_info;
+    shader_stage_create_info.pName = "main";
+    shader_stage_create_info.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+
+    VkComputePipelineCreateInfo comp_pipeline_create_info{};
+    comp_pipeline_create_info.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+    comp_pipeline_create_info.stage = shader_stage_create_info;
+    comp_pipeline_create_info.layout = pipeline_layout;
+    comp_pipeline_create_info.flags = 0;
+    CVK_CHECK_ASSERT(vkCreateComputePipelines(device, pipeline_cache, 1, &comp_pipeline_create_info, nullptr, &comp_pipeline))
+
+    VkCommandBuffer cmd_buff;
+    VkCommandBufferAllocateInfo cmd_buff_alloc_info{};
+    cmd_buff_alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    cmd_buff_alloc_info.commandBufferCount = 1;
+    cmd_buff_alloc_info.commandPool = cmd_pool;
+    cmd_buff_alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    CVK_CHECK_ASSERT(vkAllocateCommandBuffers(device, &cmd_buff_alloc_info, &cmd_buff))
+
+    VkFence fence;
+    VkFenceCreateInfo fence_create_info{};
+    fence_create_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    fence_create_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+    CVK_CHECK_ASSERT(vkCreateFence(device, &fence_create_info, nullptr, &fence))
+
     return true;
 }
 
