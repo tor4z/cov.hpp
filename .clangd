@@ -1,6 +1,0 @@
-CompileFlags:
-  Add: [
-    -Wall,
-    -std=c++17,
-    -I/home/tor4z/Source/cvk,
-  ]
