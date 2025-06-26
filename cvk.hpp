@@ -3,8 +3,8 @@
 
 #include <mutex>
 #include <optional>
+#include <utility>
 #include <vulkan/vulkan.h>
-#include <vulkan/vulkan_core.h>
 
 #define CVK_DEF_SINGLETON(classname)                                            \
     static inline classname* instance()                                         \
@@ -50,9 +50,17 @@ class Instance
 {
 public:
     ~Instance() { destroy(); }
+    // not copiable
+    Instance(const Instance&) = delete;
+    Instance& operator=(const Instance&) = delete;
+    // movable
+    Instance(Instance&&);
+    Instance& operator=(Instance&&);
+
     bool to_device(const void* data, size_t size);
     bool to_host(void* data, size_t size);
-    bool execute(const std::string& shader_path);
+    bool load_shader(const std::string& shader_path);
+    bool execute();
     void destroy();
 private:
     VkInstance vk_instance_;
@@ -64,6 +72,7 @@ private:
     VkQueue queue_;
     VkPhysicalDevice phy_device_;
     VkDevice device_;
+    VkShaderModule shader_module_;
     uint32_t queue_index_;
 
     friend class App;
@@ -91,7 +100,7 @@ private:
 // =======================================
 //            Implementation
 // =======================================
-#define CVK_IMPLEMENTATION
+#define CVK_IMPLEMENTATION // please delete me
 
 
 #ifdef CVK_IMPLEMENTATION
@@ -145,8 +154,6 @@ const std::vector<const char*> vck_validation_layers = {
     "VK_LAYER_KHRONOS_validation"
 }; // vck_validation_layers
 
-VkShaderModule load_shader(VkDevice device, const std::string& path);
-
 std::string stringify(VkResult result);
 
 bool create_buffer(VkDevice device, VkPhysicalDevice phy_device, size_t size, VkBufferUsageFlags usage,
@@ -195,7 +202,18 @@ Instance App::new_instance()
     return Instance(vk_instance);
 }
 
-Instance::Instance(VkInstance vk_instance) : vk_instance_(vk_instance)
+Instance::Instance(VkInstance vk_instance)
+    : vk_instance_(vk_instance)
+    , cmd_pool_(VK_NULL_HANDLE)
+    , host_buff_(VK_NULL_HANDLE)
+    , host_memory_(VK_NULL_HANDLE)
+    , device_buff_(VK_NULL_HANDLE)
+    , device_memory_(VK_NULL_HANDLE)
+    , queue_(VK_NULL_HANDLE)
+    , phy_device_(VK_NULL_HANDLE)
+    , device_(VK_NULL_HANDLE)
+    , shader_module_(VK_NULL_HANDLE)
+    , queue_index_(-1)
 {
     PhysicalDevice physical_device_creator;
     Device device_creator;
@@ -205,11 +223,78 @@ Instance::Instance(VkInstance vk_instance) : vk_instance_(vk_instance)
     init_command_pool(device_, queue_index_, cmd_pool_);
 }
 
+Instance::Instance(Instance&& other)
+{
+    vk_instance_ = other.vk_instance_;
+    cmd_pool_ = other.cmd_pool_;
+    host_buff_ = other.host_buff_;
+    host_memory_ = other.host_memory_;
+    device_buff_ = other.device_buff_;
+    device_memory_ = other.device_memory_;
+    queue_ = other.queue_;
+    phy_device_ = other.phy_device_;
+    device_ = other.device_;
+    shader_module_ = other.shader_module_;
+    queue_index_ = other.queue_index_;
+
+    other.vk_instance_ = VK_NULL_HANDLE;
+    other.cmd_pool_ = VK_NULL_HANDLE;
+    other.host_buff_ = VK_NULL_HANDLE;
+    other.host_memory_ = VK_NULL_HANDLE;
+    other.device_buff_ = VK_NULL_HANDLE;
+    other.device_memory_ = VK_NULL_HANDLE;
+    other.queue_ = VK_NULL_HANDLE;
+    other.phy_device_ = VK_NULL_HANDLE;
+    other.device_ = VK_NULL_HANDLE;
+    other.shader_module_ = VK_NULL_HANDLE;
+    other.queue_index_ = -1;
+}
+
+Instance& Instance::operator=(Instance&& other)
+{
+    if (this == &other) {
+        return *this;
+    }
+
+    destroy();
+    vk_instance_ = other.vk_instance_;
+    cmd_pool_ = other.cmd_pool_;
+    host_buff_ = other.host_buff_;
+    host_memory_ = other.host_memory_;
+    device_buff_ = other.device_buff_;
+    device_memory_ = other.device_memory_;
+    queue_ = other.queue_;
+    phy_device_ = other.phy_device_;
+    device_ = other.device_;
+    shader_module_ = other.shader_module_;
+    queue_index_ = other.queue_index_;
+
+    other.vk_instance_ = VK_NULL_HANDLE;
+    other.cmd_pool_ = VK_NULL_HANDLE;
+    other.host_buff_ = VK_NULL_HANDLE;
+    other.host_memory_ = VK_NULL_HANDLE;
+    other.device_buff_ = VK_NULL_HANDLE;
+    other.device_memory_ = VK_NULL_HANDLE;
+    other.queue_ = VK_NULL_HANDLE;
+    other.phy_device_ = VK_NULL_HANDLE;
+    other.device_ = VK_NULL_HANDLE;
+    other.shader_module_ = VK_NULL_HANDLE;
+    other.queue_index_ = -1;
+
+    return *this;
+}
+
 void Instance::destroy()
 {
-    vkDestroyCommandPool(device_, cmd_pool_, nullptr);
-    vkDestroyDevice(device_, nullptr);
-    vkDestroyInstance(vk_instance_, nullptr);
+    if (device_ && cmd_pool_) {
+        vkDestroyCommandPool(device_, cmd_pool_, nullptr);
+    }
+    if (device_) {
+        vkDestroyDevice(device_, nullptr);
+    }
+    if (vk_instance_) {
+        vkDestroyInstance(vk_instance_, nullptr);
+    }
 }
 
 bool Instance::to_device(const void* data, size_t size)
@@ -317,7 +402,31 @@ bool Instance::to_host(void* data, size_t size)
     return true;
 }
 
-bool Instance::execute(const std::string& shader_path)
+bool Instance::load_shader(const std::string& shader_path)
+{
+    std::ifstream ifs(shader_path, std::ios::in | std::ios::binary);
+    if (ifs.is_open()) {
+        ifs.seekg(0, std::ios::end);
+        const auto size{ifs.tellg()};
+        char* data{new char[size]};
+        ifs.seekg(0, std::ios::beg);
+        ifs.read(data, size);
+
+        VkShaderModuleCreateInfo create_info{};
+        create_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+        create_info.codeSize = size;
+        create_info.pCode = reinterpret_cast<uint32_t*>(data);
+        CVK_CHECK_ASSERT(vkCreateShaderModule(device_, &create_info, nullptr, &shader_module_))
+
+        delete [] data;
+    } else {
+        return false;
+    }
+
+    return true;
+}
+
+bool Instance::execute()
 {
     VkDescriptorPool desc_pool{};
     VkDescriptorSetLayout desc_set_layout{};
@@ -325,6 +434,10 @@ bool Instance::execute(const std::string& shader_path)
     VkDescriptorSet desc_set{};
     VkPipelineCache pipeline_cache{};
     VkPipeline comp_pipeline{};
+
+    if (shader_module_ == nullptr) {
+        return false;
+    }
 
     struct SpecializationData {
         uint32_t num_element;
@@ -401,9 +514,8 @@ bool Instance::execute(const std::string& shader_path)
     spec_info.pMapEntries = &spec_map_entry;
 
     VkPipelineShaderStageCreateInfo shader_stage_create_info{};
-    VkShaderModule shader_module{load_shader(device_, shader_path)};
     shader_stage_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    shader_stage_create_info.module = shader_module;
+    shader_stage_create_info.module = shader_module_;
     shader_stage_create_info.pSpecializationInfo = &spec_info;
     shader_stage_create_info.pName = "main";
     shader_stage_create_info.stage = VK_SHADER_STAGE_COMPUTE_BIT;
@@ -664,30 +776,6 @@ bool create_buffer(VkDevice device, VkPhysicalDevice phy_device, size_t size, Vk
     CVK_CHECK_ASSERT(vkAllocateMemory(device, &mem_alloc_info, nullptr, &memory))
     CVK_CHECK_ASSERT(vkBindBufferMemory(device, buff, memory, 0))
     return true;
-}
-
-
-VkShaderModule load_shader(VkDevice device, const std::string& path)
-{
-    VkShaderModule shader{VK_NULL_HANDLE};
-    std::ifstream ifs(path, std::ios::in | std::ios::binary);
-    if (ifs.is_open()) {
-        ifs.seekg(0, std::ios::end);
-        const auto size{ifs.tellg()};
-        char* data{new char[size]};
-        ifs.seekg(0, std::ios::beg);
-        ifs.read(data, size);
-
-        VkShaderModuleCreateInfo create_info{};
-        create_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-        create_info.codeSize = size;
-        create_info.pCode = reinterpret_cast<uint32_t*>(data);
-        CVK_CHECK_ASSERT(vkCreateShaderModule(device, &create_info, nullptr, &shader))
-
-        delete [] data;
-    }
-
-    return shader;
 }
 
 std::string stringify(VkResult result)

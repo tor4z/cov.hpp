@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <iostream>
 #include <vector>
 
@@ -13,14 +14,20 @@ int main()
     std::vector<int> out_data(in_data.size());
     
     cvk::App::init("HelloCVK");
-    auto instance{cvk::App::new_instance()};
-    instance.to_device(in_data.data(), in_data.size() * sizeof(in_data.at(0)));
-    instance.execute(shader_path);
-    instance.to_host(out_data.data(), out_data.size() * sizeof(out_data.at(0)));
+
+    {
+        // core code
+        auto instance{cvk::App::new_instance()};
+        instance.load_shader(shader_path);
+        auto move_instance = std::move(instance);   // move test
+        move_instance.to_device(in_data.data(), in_data.size() * sizeof(in_data.at(0)));
+        move_instance.execute();
+        move_instance.to_host(out_data.data(), out_data.size() * sizeof(out_data.at(0)));
+        // The instance will be automatically destroy here.
+    }
 
     for (auto it: out_data) {
         std::cout << it << "\n";
     }
-    // Instance will be automatically destroy instance here.
     return 0;
 }
