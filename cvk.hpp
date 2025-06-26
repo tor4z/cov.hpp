@@ -3,7 +3,7 @@
 
 #include <mutex>
 #include <optional>
-#include <utility>
+#include <vector>
 #include <vulkan/vulkan.h>
 
 #define CVK_DEF_SINGLETON(classname)                                            \
@@ -59,7 +59,8 @@ public:
 
     bool to_device(const void* data, size_t size);
     bool to_host(void* data, size_t size);
-    bool load_shader(const std::string& shader_path);
+    bool load_shader(const std::string& shader_path, void* spec_data=nullptr, size_t spec_data_len=0);
+    void add_spec_item(uint32_t const_id, uint32_t offset, size_t item_size);
     bool execute();
     void destroy();
 private:
@@ -73,6 +74,8 @@ private:
     VkPhysicalDevice phy_device_;
     VkDevice device_;
     VkShaderModule shader_module_;
+    VkSpecializationInfo spec_info_;
+    std::vector<VkSpecializationMapEntry> spec_map_entryies_;
     uint32_t queue_index_;
 
     friend class App;
@@ -221,6 +224,11 @@ Instance::Instance(VkInstance vk_instance)
     physical_device_creator.get(vk_instance_, phy_device_, queue_index_);
     device_creator.create(phy_device_, queue_index_, device_, queue_);
     init_command_pool(device_, queue_index_, cmd_pool_);
+
+    spec_info_.dataSize = 0;
+    spec_info_.pData = nullptr;
+    spec_info_.mapEntryCount = 0;
+    spec_info_.pMapEntries = nullptr;
 }
 
 Instance::Instance(Instance&& other)
@@ -236,6 +244,8 @@ Instance::Instance(Instance&& other)
     device_ = other.device_;
     shader_module_ = other.shader_module_;
     queue_index_ = other.queue_index_;
+    spec_info_ = other.spec_info_;
+    spec_map_entryies_ = other.spec_map_entryies_;
 
     other.vk_instance_ = VK_NULL_HANDLE;
     other.cmd_pool_ = VK_NULL_HANDLE;
@@ -248,6 +258,7 @@ Instance::Instance(Instance&& other)
     other.device_ = VK_NULL_HANDLE;
     other.shader_module_ = VK_NULL_HANDLE;
     other.queue_index_ = -1;
+    other.spec_map_entryies_.clear();
 }
 
 Instance& Instance::operator=(Instance&& other)
@@ -268,6 +279,8 @@ Instance& Instance::operator=(Instance&& other)
     device_ = other.device_;
     shader_module_ = other.shader_module_;
     queue_index_ = other.queue_index_;
+    spec_info_ = other.spec_info_;
+    spec_map_entryies_ = other.spec_map_entryies_;
 
     other.vk_instance_ = VK_NULL_HANDLE;
     other.cmd_pool_ = VK_NULL_HANDLE;
@@ -280,6 +293,7 @@ Instance& Instance::operator=(Instance&& other)
     other.device_ = VK_NULL_HANDLE;
     other.shader_module_ = VK_NULL_HANDLE;
     other.queue_index_ = -1;
+    other.spec_map_entryies_.clear();
 
     return *this;
 }
@@ -295,6 +309,8 @@ void Instance::destroy()
     if (vk_instance_) {
         vkDestroyInstance(vk_instance_, nullptr);
     }
+
+    spec_map_entryies_.clear();
 }
 
 bool Instance::to_device(const void* data, size_t size)
@@ -402,7 +418,7 @@ bool Instance::to_host(void* data, size_t size)
     return true;
 }
 
-bool Instance::load_shader(const std::string& shader_path)
+bool Instance::load_shader(const std::string& shader_path, void* spec_data, size_t spec_data_len)
 {
     std::ifstream ifs(shader_path, std::ios::in | std::ios::binary);
     if (ifs.is_open()) {
@@ -417,6 +433,9 @@ bool Instance::load_shader(const std::string& shader_path)
         create_info.codeSize = size;
         create_info.pCode = reinterpret_cast<uint32_t*>(data);
         CVK_CHECK_ASSERT(vkCreateShaderModule(device_, &create_info, nullptr, &shader_module_))
+        // specialization the shader
+        spec_info_.dataSize = spec_data_len;
+        spec_info_.pData = spec_data;
 
         delete [] data;
     } else {
@@ -424,6 +443,21 @@ bool Instance::load_shader(const std::string& shader_path)
     }
 
     return true;
+}
+
+void Instance::add_spec_item(uint32_t const_id, uint32_t offset, size_t item_size)
+{
+    assert(spec_info_.pData != nullptr && spec_info_.dataSize > 0 &&
+        "Specialization data is empty, no item to be add");
+
+    VkSpecializationMapEntry spec_map_entry{};
+    spec_map_entry.constantID = const_id;
+    spec_map_entry.offset = offset;
+    spec_map_entry.size = item_size;
+
+    spec_map_entryies_.push_back(spec_map_entry);
+    spec_info_.mapEntryCount = spec_map_entryies_.size();
+    spec_info_.pMapEntries = spec_map_entryies_.data();
 }
 
 bool Instance::execute()
@@ -438,10 +472,6 @@ bool Instance::execute()
     if (shader_module_ == nullptr) {
         return false;
     }
-
-    struct SpecializationData {
-        uint32_t num_element;
-    }; // struct SpecializationData
 
     std::vector<VkDescriptorPoolSize> pool_sizes{
         VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .descriptorCount = 1}
@@ -501,22 +531,14 @@ bool Instance::execute()
     pipeline_cache_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
     CVK_CHECK_ASSERT(vkCreatePipelineCache(device_, &pipeline_cache_create_info, nullptr, &pipeline_cache))
 
-    VkSpecializationMapEntry spec_map_entry{};
-    spec_map_entry.constantID = 0;
-    spec_map_entry.offset = 0;
-    spec_map_entry.size = sizeof(uint32_t);
-
-    VkSpecializationInfo spec_info{};
-    SpecializationData spec_data{.num_element = 8};
-    spec_info.dataSize = sizeof(spec_data);
-    spec_info.pData = &spec_data;
-    spec_info.mapEntryCount = 1;
-    spec_info.pMapEntries = &spec_map_entry;
-
     VkPipelineShaderStageCreateInfo shader_stage_create_info{};
     shader_stage_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     shader_stage_create_info.module = shader_module_;
-    shader_stage_create_info.pSpecializationInfo = &spec_info;
+    if (spec_info_.mapEntryCount > 0) {
+        shader_stage_create_info.pSpecializationInfo = &spec_info_;
+    } else {
+        shader_stage_create_info.pSpecializationInfo = VK_NULL_HANDLE;
+    }
     shader_stage_create_info.pName = "main";
     shader_stage_create_info.stage = VK_SHADER_STAGE_COMPUTE_BIT;
 

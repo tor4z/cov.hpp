@@ -1,9 +1,15 @@
 #include <algorithm>
+#include <cstdint>
 #include <iostream>
 #include <vector>
 
 #define CVK_IMPLEMENTATION
 #include "cvk.hpp"
+
+
+struct SpecializationData {
+    uint32_t num_element;
+}; // struct SpecializationData
 
 
 int main()
@@ -16,13 +22,17 @@ int main()
     cvk::App::init("HelloCVK");
 
     {
+        SpecializationData spec_data{.num_element = 32};
         // core code
         auto instance{cvk::App::new_instance()};
-        instance.load_shader(shader_path);
-        auto move_instance = std::move(instance);   // move test
-        move_instance.to_device(in_data.data(), in_data.size() * sizeof(in_data.at(0)));
-        move_instance.execute();
-        move_instance.to_host(out_data.data(), out_data.size() * sizeof(out_data.at(0)));
+        instance.load_shader(shader_path, &spec_data, sizeof(spec_data));
+        instance.add_spec_item(0, 0, sizeof(uint32_t));
+
+        instance.to_device(in_data.data(), in_data.size() * sizeof(in_data.at(0)));
+        if (!instance.execute()) {
+            std::cerr << "execute shader program failed\n";
+        }
+        instance.to_host(out_data.data(), out_data.size() * sizeof(out_data.at(0)));
         // The instance will be automatically destroy here.
     }
 
