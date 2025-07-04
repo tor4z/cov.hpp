@@ -1,4 +1,4 @@
-# Compute VulKan (CVK)
+# Compute Over Vulkan (COV)
 
 A head only library for high performance computing with vulkan in `c++`
 
