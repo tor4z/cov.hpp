@@ -1,12 +1,12 @@
-#ifndef CVK_H_
-#define CVK_H_
+#ifndef COV_H_
+#define COV_H_
 
 #include <mutex>
 #include <optional>
 #include <vector>
 #include <vulkan/vulkan.h>
 
-#define CVK_DEF_SINGLETON(classname)                                            \
+#define COV_DEF_SINGLETON(classname)                                            \
     static inline classname* instance()                                         \
     {                                                                           \
         static classname *instance_ = nullptr;                                  \
@@ -24,7 +24,7 @@ private:                                                                        
     classname(const classname&&) = delete;                                      \
     classname& operator=(const classname&&) = delete;
 
-namespace cvk {
+namespace cov {
 
 class PhysicalDevice
 {
@@ -91,24 +91,24 @@ public:
 private:
     VkApplicationInfo vk_app_info_;
 
-    CVK_DEF_SINGLETON(App)
+    COV_DEF_SINGLETON(App)
     App() = default;
     ~App() = default;
 }; // class App
 
-} // namespace cvk
+} // namespace cov
 
-#endif // CVK_H_
+#endif // COV_H_
 
 // =======================================
 //            Implementation
 // =======================================
-#define CVK_IMPLEMENTATION // please delete me
+#define COV_IMPLEMENTATION // please delete me
 
 
-#ifdef CVK_IMPLEMENTATION
-#ifndef CVK_IMPLEMENTATION_CPP_
-#define CVK_IMPLEMENTATION_CPP_
+#ifdef COV_IMPLEMENTATION
+#ifndef COV_IMPLEMENTATION_CPP_
+#define COV_IMPLEMENTATION_CPP_
 
 #include <cstdint>
 #include <cstdlib>
@@ -124,9 +124,9 @@ private:
 #include <iostream>
 
 #ifdef NDEBUG
-#   define CVK_ENABLE_VALIDATION 0
+#   define COV_ENABLE_VALIDATION 0
 #else
-#   define CVK_ENABLE_VALIDATION 1
+#   define COV_ENABLE_VALIDATION 1
 #endif
 
 #define CHECK_VALIDATION_AVAILABLE()                                            \
@@ -139,19 +139,19 @@ private:
         }                                                                       \
     } while (0)
 
-#define CVK_CHECK_ASSERT(result)                                                \
+#define COV_CHECK_ASSERT(result)                                                \
     if ((result) != VK_SUCCESS) {                                               \
         std::cerr << "Vulkan Failed with error: " << stringify(result) << "\n"; \
         assert(false);                                                          \
     }
 
-#define CVK_CHECK_FALSE(result)                                                 \
+#define COV_CHECK_FALSE(result)                                                 \
     if ((result) != VK_SUCCESS) {                                               \
         std::cerr << "Vulkan Failed with error: " << stringify(result) << "\n"; \
         return false;                                                           \
     }
 
-namespace cvk {
+namespace cov {
 
 const std::vector<const char*> vck_validation_layers = {
     "VK_LAYER_KHRONOS_validation"
@@ -170,7 +170,7 @@ public:
 private:
     std::vector<VkExtensionProperties> exts_;
 
-    CVK_DEF_SINGLETON(Extensions)
+    COV_DEF_SINGLETON(Extensions)
     Extensions();
 }; // class Extensions
 
@@ -192,16 +192,16 @@ Instance App::new_instance()
     VkInstanceCreateInfo create_info{};
     create_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     create_info.pApplicationInfo = &(ins->vk_app_info_);
-#if CVK_ENABLE_VALIDATION
+#if COV_ENABLE_VALIDATION
     CHECK_VALIDATION_AVAILABLE();
     create_info.enabledLayerCount = static_cast<uint32_t>(vck_validation_layers.size());
     create_info.ppEnabledLayerNames = vck_validation_layers.data();
-#else // CVK_ENABLE_VALIDATION
+#else // COV_ENABLE_VALIDATION
     create_info.enabledLayerCount = 0;
-#endif // CVK_ENABLE_VALIDATION
+#endif // COV_ENABLE_VALIDATION
 
     VkInstance vk_instance;
-    CVK_CHECK_ASSERT(vkCreateInstance(&create_info, nullptr, &vk_instance))
+    COV_CHECK_ASSERT(vkCreateInstance(&create_info, nullptr, &vk_instance))
     return Instance(vk_instance);
 }
 
@@ -331,7 +331,7 @@ bool Instance::to_device(const void* data, size_t size)
     mem_range.size = size;
     mem_range.offset = 0;
     mem_range.memory = host_memory_;
-    CVK_CHECK_ASSERT(vkFlushMappedMemoryRanges(device_, 1, &mem_range));
+    COV_CHECK_ASSERT(vkFlushMappedMemoryRanges(device_, 1, &mem_range));
     vkUnmapMemory(device_, host_memory_);
 
     create_buffer(device_, phy_device_, size,
@@ -345,15 +345,15 @@ bool Instance::to_device(const void* data, size_t size)
     cmd_alloc_info.commandBufferCount = 1;
 
     VkCommandBuffer cmd_buff;
-    CVK_CHECK_ASSERT(vkAllocateCommandBuffers(device_, &cmd_alloc_info, &cmd_buff));
+    COV_CHECK_ASSERT(vkAllocateCommandBuffers(device_, &cmd_alloc_info, &cmd_buff));
 
     VkCommandBufferBeginInfo cmd_begin_info{};
     cmd_begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    CVK_CHECK_ASSERT(vkBeginCommandBuffer(cmd_buff, &cmd_begin_info));
+    COV_CHECK_ASSERT(vkBeginCommandBuffer(cmd_buff, &cmd_begin_info));
     VkBufferCopy copy_region{};
     copy_region.size = size;
     vkCmdCopyBuffer(cmd_buff, host_buff_, device_buff_, 1, &copy_region);
-    CVK_CHECK_ASSERT(vkEndCommandBuffer(cmd_buff));
+    COV_CHECK_ASSERT(vkEndCommandBuffer(cmd_buff));
 
     // submmit
     VkSubmitInfo submit_info{};
@@ -365,9 +365,9 @@ bool Instance::to_device(const void* data, size_t size)
     VkFence fence{};
     fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     fence_info.flags = 0;
-    CVK_CHECK_ASSERT(vkCreateFence(device_, &fence_info, nullptr, &fence))
-    CVK_CHECK_ASSERT(vkQueueSubmit(queue_, 1, &submit_info, fence))
-    CVK_CHECK_ASSERT(vkWaitForFences(device_, 1, &fence, VK_TRUE, UINT64_MAX))
+    COV_CHECK_ASSERT(vkCreateFence(device_, &fence_info, nullptr, &fence))
+    COV_CHECK_ASSERT(vkQueueSubmit(queue_, 1, &submit_info, fence))
+    COV_CHECK_ASSERT(vkWaitForFences(device_, 1, &fence, VK_TRUE, UINT64_MAX))
 
     vkDestroyFence(device_, fence, nullptr);
     vkFreeCommandBuffers(device_, cmd_pool_, 1, &cmd_buff);
@@ -383,16 +383,16 @@ bool Instance::to_host(void* data, size_t size)
     cmd_alloc_info.commandBufferCount = 1;
 
     VkCommandBuffer cmd_buff;
-    CVK_CHECK_ASSERT(vkAllocateCommandBuffers(device_, &cmd_alloc_info, &cmd_buff));
+    COV_CHECK_ASSERT(vkAllocateCommandBuffers(device_, &cmd_alloc_info, &cmd_buff));
 
     VkCommandBufferBeginInfo begin_info{};
     begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 
-    CVK_CHECK_ASSERT(vkBeginCommandBuffer(cmd_buff, &begin_info))
+    COV_CHECK_ASSERT(vkBeginCommandBuffer(cmd_buff, &begin_info))
     VkBufferCopy copy_region{};
     copy_region.size = size;
     vkCmdCopyBuffer(cmd_buff, device_buff_, host_buff_, 1, &copy_region);
-    CVK_CHECK_ASSERT(vkEndCommandBuffer(cmd_buff))
+    COV_CHECK_ASSERT(vkEndCommandBuffer(cmd_buff))
 
     // submit
     VkSubmitInfo submit_info{};
@@ -404,9 +404,9 @@ bool Instance::to_host(void* data, size_t size)
     VkFence fence{};
     fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     fence_info.flags = 0;
-    CVK_CHECK_ASSERT(vkCreateFence(device_, &fence_info, nullptr, &fence))
-    CVK_CHECK_ASSERT(vkQueueSubmit(queue_, 1, &submit_info, fence))
-    CVK_CHECK_ASSERT(vkWaitForFences(device_, 1, &fence, VK_TRUE, UINT64_MAX))
+    COV_CHECK_ASSERT(vkCreateFence(device_, &fence_info, nullptr, &fence))
+    COV_CHECK_ASSERT(vkQueueSubmit(queue_, 1, &submit_info, fence))
+    COV_CHECK_ASSERT(vkWaitForFences(device_, 1, &fence, VK_TRUE, UINT64_MAX))
 
     vkDestroyFence(device_, fence, nullptr);
     vkFreeCommandBuffers(device_, cmd_pool_, 1, &cmd_buff);
@@ -432,7 +432,7 @@ bool Instance::load_shader(const std::string& shader_path, void* spec_data, size
         create_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
         create_info.codeSize = size;
         create_info.pCode = reinterpret_cast<uint32_t*>(data);
-        CVK_CHECK_ASSERT(vkCreateShaderModule(device_, &create_info, nullptr, &shader_module_))
+        COV_CHECK_ASSERT(vkCreateShaderModule(device_, &create_info, nullptr, &shader_module_))
         // specialization the shader
         spec_info_.dataSize = spec_data_len;
         spec_info_.pData = spec_data;
@@ -481,7 +481,7 @@ bool Instance::execute()
     pool_create_info.poolSizeCount = static_cast<uint32_t>(pool_sizes.size());
     pool_create_info.pPoolSizes = pool_sizes.data();
     pool_create_info.maxSets = 1;
-    CVK_CHECK_ASSERT(vkCreateDescriptorPool(device_, &pool_create_info, nullptr, &desc_pool))
+    COV_CHECK_ASSERT(vkCreateDescriptorPool(device_, &pool_create_info, nullptr, &desc_pool))
 
     std::vector<VkDescriptorSetLayoutBinding> set_layout_bindings{
         VkDescriptorSetLayoutBinding{
@@ -496,20 +496,20 @@ bool Instance::execute()
     layout_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     layout_create_info.bindingCount = static_cast<uint32_t>(set_layout_bindings.size());
     layout_create_info.pBindings = set_layout_bindings.data();
-    CVK_CHECK_ASSERT(vkCreateDescriptorSetLayout(device_, &layout_create_info, nullptr, &desc_set_layout))
+    COV_CHECK_ASSERT(vkCreateDescriptorSetLayout(device_, &layout_create_info, nullptr, &desc_set_layout))
 
     VkPipelineLayoutCreateInfo pipeline_create_info{};
     pipeline_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipeline_create_info.setLayoutCount = 1;
     pipeline_create_info.pSetLayouts = &desc_set_layout;
-    CVK_CHECK_ASSERT(vkCreatePipelineLayout(device_, &pipeline_create_info, nullptr, &pipeline_layout))
+    COV_CHECK_ASSERT(vkCreatePipelineLayout(device_, &pipeline_create_info, nullptr, &pipeline_layout))
 
     VkDescriptorSetAllocateInfo desc_alloc_info{};
     desc_alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     desc_alloc_info.descriptorSetCount = 1;
     desc_alloc_info.descriptorPool = desc_pool;
     desc_alloc_info.pSetLayouts = &desc_set_layout;
-    CVK_CHECK_ASSERT(vkAllocateDescriptorSets(device_, &desc_alloc_info, &desc_set))
+    COV_CHECK_ASSERT(vkAllocateDescriptorSets(device_, &desc_alloc_info, &desc_set))
 
     VkDescriptorBufferInfo desc_buff_info{};
     desc_buff_info.range = VK_WHOLE_SIZE;
@@ -529,7 +529,7 @@ bool Instance::execute()
 
     VkPipelineCacheCreateInfo pipeline_cache_create_info{};
     pipeline_cache_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
-    CVK_CHECK_ASSERT(vkCreatePipelineCache(device_, &pipeline_cache_create_info, nullptr, &pipeline_cache))
+    COV_CHECK_ASSERT(vkCreatePipelineCache(device_, &pipeline_cache_create_info, nullptr, &pipeline_cache))
 
     VkPipelineShaderStageCreateInfo shader_stage_create_info{};
     shader_stage_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -547,7 +547,7 @@ bool Instance::execute()
     comp_pipeline_create_info.stage = shader_stage_create_info;
     comp_pipeline_create_info.layout = pipeline_layout;
     comp_pipeline_create_info.flags = 0;
-    CVK_CHECK_ASSERT(vkCreateComputePipelines(device_, pipeline_cache, 1, &comp_pipeline_create_info, nullptr, &comp_pipeline))
+    COV_CHECK_ASSERT(vkCreateComputePipelines(device_, pipeline_cache, 1, &comp_pipeline_create_info, nullptr, &comp_pipeline))
 
     VkCommandBuffer cmd_buff;
     VkCommandBufferAllocateInfo cmd_buff_alloc_info{};
@@ -555,17 +555,17 @@ bool Instance::execute()
     cmd_buff_alloc_info.commandBufferCount = 1;
     cmd_buff_alloc_info.commandPool = cmd_pool_;
     cmd_buff_alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    CVK_CHECK_ASSERT(vkAllocateCommandBuffers(device_, &cmd_buff_alloc_info, &cmd_buff))
+    COV_CHECK_ASSERT(vkAllocateCommandBuffers(device_, &cmd_buff_alloc_info, &cmd_buff))
 
     VkFence fence;
     VkFenceCreateInfo fence_create_info{};
     fence_create_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     fence_create_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-    CVK_CHECK_ASSERT(vkCreateFence(device_, &fence_create_info, nullptr, &fence))
+    COV_CHECK_ASSERT(vkCreateFence(device_, &fence_create_info, nullptr, &fence))
 
     VkCommandBufferBeginInfo cmd_begin_info{};
     cmd_begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    CVK_CHECK_ASSERT(vkBeginCommandBuffer(cmd_buff, &cmd_begin_info))
+    COV_CHECK_ASSERT(vkBeginCommandBuffer(cmd_buff, &cmd_begin_info))
 
     VkBufferMemoryBarrier mem_buff_barrier{};
     mem_buff_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
@@ -595,7 +595,7 @@ bool Instance::execute()
     //     0, nullptr,
     //     1, &mem_buff_barrier,
     //     0, nullptr);
-    CVK_CHECK_ASSERT(vkEndCommandBuffer(cmd_buff))
+    COV_CHECK_ASSERT(vkEndCommandBuffer(cmd_buff))
     vkResetFences(device_, 1, &fence);
 
 
@@ -605,8 +605,8 @@ bool Instance::execute()
     submit_info.commandBufferCount = 1;
     submit_info.pCommandBuffers = &cmd_buff;
     submit_info.pWaitDstStageMask = &wait_stage_mask;
-    CVK_CHECK_ASSERT(vkQueueSubmit(queue_, 1, &submit_info, fence))
-    CVK_CHECK_ASSERT(vkWaitForFences(device_, 1, &fence, VK_TRUE, UINT64_MAX))
+    COV_CHECK_ASSERT(vkQueueSubmit(queue_, 1, &submit_info, fence))
+    COV_CHECK_ASSERT(vkWaitForFences(device_, 1, &fence, VK_TRUE, UINT64_MAX))
 
     return true;
 }
@@ -735,13 +735,13 @@ bool Device::create(VkPhysicalDevice phy_device, uint32_t queue_index, VkDevice&
     create_info.pQueueCreateInfos = &que_create_info;
     create_info.queueCreateInfoCount = 1;
     create_info.pEnabledFeatures = &device_features;
-#if CVK_ENABLE_VALIDATION
+#if COV_ENABLE_VALIDATION
     CHECK_VALIDATION_AVAILABLE();
     create_info.ppEnabledLayerNames = vck_validation_layers.data();
     create_info.enabledLayerCount = static_cast<uint32_t>(vck_validation_layers.size());
-#else // CVK_ENABLE_VALIDATION
+#else // COV_ENABLE_VALIDATION
     create_info.enabledLayerCount = 0;
-#endif // CVK_ENABLE_VALIDATION
+#endif // COV_ENABLE_VALIDATION
 
     if (vkCreateDevice(phy_device, &create_info, nullptr, &device) != VK_SUCCESS) {
         return false;
@@ -768,7 +768,7 @@ bool create_buffer(VkDevice device, VkPhysicalDevice phy_device, size_t size, Vk
     buff_create_info.usage = usage;
     buff_create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    CVK_CHECK_ASSERT(vkCreateBuffer(device, &buff_create_info, nullptr, &buff))
+    COV_CHECK_ASSERT(vkCreateBuffer(device, &buff_create_info, nullptr, &buff))
 
     VkMemoryRequirements mem_reqs;
     vkGetBufferMemoryRequirements(device, buff, &mem_reqs);
@@ -795,71 +795,71 @@ bool create_buffer(VkDevice device, VkPhysicalDevice phy_device, size_t size, Vk
         return false;
     }
 
-    CVK_CHECK_ASSERT(vkAllocateMemory(device, &mem_alloc_info, nullptr, &memory))
-    CVK_CHECK_ASSERT(vkBindBufferMemory(device, buff, memory, 0))
+    COV_CHECK_ASSERT(vkAllocateMemory(device, &mem_alloc_info, nullptr, &memory))
+    COV_CHECK_ASSERT(vkBindBufferMemory(device, buff, memory, 0))
     return true;
 }
 
 std::string stringify(VkResult result)
 {
-#define CVK_MATCH_STRINGIFY(r) case VK_##r: return #r;
+#define COV_MATCH_STRINGIFY(r) case VK_##r: return #r;
 
     switch (result) {
-    CVK_MATCH_STRINGIFY(SUCCESS)
-    CVK_MATCH_STRINGIFY(NOT_READY)
-    CVK_MATCH_STRINGIFY(TIMEOUT)
-    CVK_MATCH_STRINGIFY(EVENT_SET)
-    CVK_MATCH_STRINGIFY(EVENT_RESET)
-    CVK_MATCH_STRINGIFY(INCOMPLETE)
-    CVK_MATCH_STRINGIFY(ERROR_OUT_OF_HOST_MEMORY)
-    CVK_MATCH_STRINGIFY(ERROR_OUT_OF_DEVICE_MEMORY)
-    CVK_MATCH_STRINGIFY(ERROR_INITIALIZATION_FAILED)
-    CVK_MATCH_STRINGIFY(ERROR_DEVICE_LOST)
-    CVK_MATCH_STRINGIFY(ERROR_MEMORY_MAP_FAILED)
-    CVK_MATCH_STRINGIFY(ERROR_LAYER_NOT_PRESENT)
-    CVK_MATCH_STRINGIFY(ERROR_EXTENSION_NOT_PRESENT)
-    CVK_MATCH_STRINGIFY(ERROR_FEATURE_NOT_PRESENT)
-    CVK_MATCH_STRINGIFY(ERROR_INCOMPATIBLE_DRIVER)
-    CVK_MATCH_STRINGIFY(ERROR_TOO_MANY_OBJECTS)
-    CVK_MATCH_STRINGIFY(ERROR_FORMAT_NOT_SUPPORTED)
-    CVK_MATCH_STRINGIFY(ERROR_FRAGMENTED_POOL)
-    CVK_MATCH_STRINGIFY(ERROR_UNKNOWN)
-    CVK_MATCH_STRINGIFY(ERROR_OUT_OF_POOL_MEMORY)
-    CVK_MATCH_STRINGIFY(ERROR_INVALID_EXTERNAL_HANDLE)
-    CVK_MATCH_STRINGIFY(ERROR_FRAGMENTATION)
-    CVK_MATCH_STRINGIFY(ERROR_INVALID_OPAQUE_CAPTURE_ADDRESS)
-    CVK_MATCH_STRINGIFY(PIPELINE_COMPILE_REQUIRED)
-    CVK_MATCH_STRINGIFY(ERROR_NOT_PERMITTED)
-    CVK_MATCH_STRINGIFY(ERROR_SURFACE_LOST_KHR)
-    CVK_MATCH_STRINGIFY(ERROR_NATIVE_WINDOW_IN_USE_KHR)
-    CVK_MATCH_STRINGIFY(SUBOPTIMAL_KHR)
-    CVK_MATCH_STRINGIFY(ERROR_OUT_OF_DATE_KHR)
-    CVK_MATCH_STRINGIFY(ERROR_INCOMPATIBLE_DISPLAY_KHR)
-    CVK_MATCH_STRINGIFY(ERROR_VALIDATION_FAILED_EXT)
-    CVK_MATCH_STRINGIFY(ERROR_INVALID_SHADER_NV)
-    CVK_MATCH_STRINGIFY(ERROR_IMAGE_USAGE_NOT_SUPPORTED_KHR)
-    CVK_MATCH_STRINGIFY(ERROR_VIDEO_PICTURE_LAYOUT_NOT_SUPPORTED_KHR)
-    CVK_MATCH_STRINGIFY(ERROR_VIDEO_PROFILE_OPERATION_NOT_SUPPORTED_KHR)
-    CVK_MATCH_STRINGIFY(ERROR_VIDEO_PROFILE_FORMAT_NOT_SUPPORTED_KHR)
-    CVK_MATCH_STRINGIFY(ERROR_VIDEO_PROFILE_CODEC_NOT_SUPPORTED_KHR)
-    CVK_MATCH_STRINGIFY(ERROR_VIDEO_STD_VERSION_NOT_SUPPORTED_KHR)
-    CVK_MATCH_STRINGIFY(ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT)
-    CVK_MATCH_STRINGIFY(ERROR_FULL_SCREEN_EXCLUSIVE_MODE_LOST_EXT)
-    CVK_MATCH_STRINGIFY(THREAD_IDLE_KHR)
-    CVK_MATCH_STRINGIFY(THREAD_DONE_KHR)
-    CVK_MATCH_STRINGIFY(OPERATION_DEFERRED_KHR)
-    CVK_MATCH_STRINGIFY(OPERATION_NOT_DEFERRED_KHR)
-    CVK_MATCH_STRINGIFY(ERROR_INVALID_VIDEO_STD_PARAMETERS_KHR)
-    CVK_MATCH_STRINGIFY(ERROR_COMPRESSION_EXHAUSTED_EXT)
-    CVK_MATCH_STRINGIFY(INCOMPATIBLE_SHADER_BINARY_EXT)
-    CVK_MATCH_STRINGIFY(PIPELINE_BINARY_MISSING_KHR)
-    CVK_MATCH_STRINGIFY(ERROR_NOT_ENOUGH_SPACE_KHR)
+    COV_MATCH_STRINGIFY(SUCCESS)
+    COV_MATCH_STRINGIFY(NOT_READY)
+    COV_MATCH_STRINGIFY(TIMEOUT)
+    COV_MATCH_STRINGIFY(EVENT_SET)
+    COV_MATCH_STRINGIFY(EVENT_RESET)
+    COV_MATCH_STRINGIFY(INCOMPLETE)
+    COV_MATCH_STRINGIFY(ERROR_OUT_OF_HOST_MEMORY)
+    COV_MATCH_STRINGIFY(ERROR_OUT_OF_DEVICE_MEMORY)
+    COV_MATCH_STRINGIFY(ERROR_INITIALIZATION_FAILED)
+    COV_MATCH_STRINGIFY(ERROR_DEVICE_LOST)
+    COV_MATCH_STRINGIFY(ERROR_MEMORY_MAP_FAILED)
+    COV_MATCH_STRINGIFY(ERROR_LAYER_NOT_PRESENT)
+    COV_MATCH_STRINGIFY(ERROR_EXTENSION_NOT_PRESENT)
+    COV_MATCH_STRINGIFY(ERROR_FEATURE_NOT_PRESENT)
+    COV_MATCH_STRINGIFY(ERROR_INCOMPATIBLE_DRIVER)
+    COV_MATCH_STRINGIFY(ERROR_TOO_MANY_OBJECTS)
+    COV_MATCH_STRINGIFY(ERROR_FORMAT_NOT_SUPPORTED)
+    COV_MATCH_STRINGIFY(ERROR_FRAGMENTED_POOL)
+    COV_MATCH_STRINGIFY(ERROR_UNKNOWN)
+    COV_MATCH_STRINGIFY(ERROR_OUT_OF_POOL_MEMORY)
+    COV_MATCH_STRINGIFY(ERROR_INVALID_EXTERNAL_HANDLE)
+    COV_MATCH_STRINGIFY(ERROR_FRAGMENTATION)
+    COV_MATCH_STRINGIFY(ERROR_INVALID_OPAQUE_CAPTURE_ADDRESS)
+    COV_MATCH_STRINGIFY(PIPELINE_COMPILE_REQUIRED)
+    COV_MATCH_STRINGIFY(ERROR_NOT_PERMITTED)
+    COV_MATCH_STRINGIFY(ERROR_SURFACE_LOST_KHR)
+    COV_MATCH_STRINGIFY(ERROR_NATIVE_WINDOW_IN_USE_KHR)
+    COV_MATCH_STRINGIFY(SUBOPTIMAL_KHR)
+    COV_MATCH_STRINGIFY(ERROR_OUT_OF_DATE_KHR)
+    COV_MATCH_STRINGIFY(ERROR_INCOMPATIBLE_DISPLAY_KHR)
+    COV_MATCH_STRINGIFY(ERROR_VALIDATION_FAILED_EXT)
+    COV_MATCH_STRINGIFY(ERROR_INVALID_SHADER_NV)
+    COV_MATCH_STRINGIFY(ERROR_IMAGE_USAGE_NOT_SUPPORTED_KHR)
+    COV_MATCH_STRINGIFY(ERROR_VIDEO_PICTURE_LAYOUT_NOT_SUPPORTED_KHR)
+    COV_MATCH_STRINGIFY(ERROR_VIDEO_PROFILE_OPERATION_NOT_SUPPORTED_KHR)
+    COV_MATCH_STRINGIFY(ERROR_VIDEO_PROFILE_FORMAT_NOT_SUPPORTED_KHR)
+    COV_MATCH_STRINGIFY(ERROR_VIDEO_PROFILE_CODEC_NOT_SUPPORTED_KHR)
+    COV_MATCH_STRINGIFY(ERROR_VIDEO_STD_VERSION_NOT_SUPPORTED_KHR)
+    COV_MATCH_STRINGIFY(ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT)
+    COV_MATCH_STRINGIFY(ERROR_FULL_SCREEN_EXCLUSIVE_MODE_LOST_EXT)
+    COV_MATCH_STRINGIFY(THREAD_IDLE_KHR)
+    COV_MATCH_STRINGIFY(THREAD_DONE_KHR)
+    COV_MATCH_STRINGIFY(OPERATION_DEFERRED_KHR)
+    COV_MATCH_STRINGIFY(OPERATION_NOT_DEFERRED_KHR)
+    COV_MATCH_STRINGIFY(ERROR_INVALID_VIDEO_STD_PARAMETERS_KHR)
+    COV_MATCH_STRINGIFY(ERROR_COMPRESSION_EXHAUSTED_EXT)
+    COV_MATCH_STRINGIFY(INCOMPATIBLE_SHADER_BINARY_EXT)
+    COV_MATCH_STRINGIFY(PIPELINE_BINARY_MISSING_KHR)
+    COV_MATCH_STRINGIFY(ERROR_NOT_ENOUGH_SPACE_KHR)
     default: return "UNKNOWN ERROR";
     }
-#undef CVK_MATCH_STRINGIFY
+#undef COV_MATCH_STRINGIFY
 }
 
-} // namespace cvk
+} // namespace cov
 
-#endif // CVK_IMPLEMENTATION_CPP_
-#endif // CVK_IMPLEMENTATION
+#endif // COV_IMPLEMENTATION_CPP_
+#endif // COV_IMPLEMENTATION

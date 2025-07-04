@@ -4,7 +4,7 @@
 #include <vector>
 
 #define CVK_IMPLEMENTATION
-#include "cvk.hpp"
+#include "cov.hpp"
 
 
 struct SpecializationData {
@@ -19,12 +19,12 @@ int main()
     std::vector<int> in_data{1, 2, 3, 4, 5, 6, 7};
     std::vector<int> out_data(in_data.size());
     
-    cvk::App::init("HelloCVK");
+    cov::App::init("HelloCVK");
 
     {
         SpecializationData spec_data{.num_element = 32};
         // core code
-        auto instance{cvk::App::new_instance()};
+        auto instance{cov::App::new_instance()};
         instance.load_shader(shader_path, &spec_data, sizeof(spec_data));
         instance.add_spec_item(0, 0, sizeof(uint32_t));
 
