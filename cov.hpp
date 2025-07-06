@@ -5,6 +5,7 @@
 #include <optional>
 #include <vector>
 #include <vulkan/vulkan.h>
+#include <vulkan/vulkan_core.h>
 
 #define COV_DEF_SINGLETON(classname)                                            \
     static inline classname* instance()                                         \
@@ -75,6 +76,7 @@ private:
     VkDevice device_;
     VkShaderModule shader_module_;
     VkSpecializationInfo spec_info_;
+    VkDebugUtilsMessengerEXT debug_messenger_;
     std::vector<VkSpecializationMapEntry> spec_map_entryies_;
     uint32_t queue_index_;
 
@@ -123,16 +125,17 @@ private:
 #include <cstring>
 #include <iostream>
 
-#ifdef NDEBUG
-#   define COV_ENABLE_VALIDATION 0
-#else
+#ifdef COV_VULKAN_VALIDATION
 #   define COV_ENABLE_VALIDATION 1
-#endif
+#else // COV_VULKAN_VALIDATION
+#   define COV_ENABLE_VALIDATION 0
+#endif // COV_VULKAN_VALIDATION
+
 
 #define CHECK_VALIDATION_AVAILABLE()                                            \
     do {                                                                        \
-        for (auto layer: vck_validation_layers) {                               \
-            if (!Extensions::has(layer)) {                                      \
+        for (auto layer: cov_validation_layers) {                               \
+            if (!LayerExtensions::has_layer(layer)) {                                      \
                 std::cerr << "Validation layer: " << layer << " not found\n";   \
                 exit(1);                                                        \
             }                                                                   \
@@ -153,26 +156,29 @@ private:
 
 namespace cov {
 
-const std::vector<const char*> vck_validation_layers = {
+const std::vector<const char*> cov_validation_layers = {
     "VK_LAYER_KHRONOS_validation"
-}; // vck_validation_layers
+}; // cov_validation_layers
 
 std::string stringify(VkResult result);
 
 bool create_buffer(VkDevice device, VkPhysicalDevice phy_device, size_t size, VkBufferUsageFlags usage,
     VkMemoryPropertyFlags property_flags, VkBuffer& buff, VkDeviceMemory& memory);
 
-class Extensions
+class LayerExtensions
 {
 public:
-    static const std::vector<VkExtensionProperties>& get();
-    static bool has(const char* ext_name);
+    static const std::vector<VkExtensionProperties>& get_exts();
+    static const std::vector<VkLayerProperties>& get_layers();
+    static bool has_ext(const char* ext_name);
+    static bool has_layer(const char* layer_name);
 private:
     std::vector<VkExtensionProperties> exts_;
+    std::vector<VkLayerProperties> layers_;
 
-    COV_DEF_SINGLETON(Extensions)
-    Extensions();
-}; // class Extensions
+    COV_DEF_SINGLETON(LayerExtensions)
+    LayerExtensions();
+}; // class LayerExtensions
 
 void App::init(const char* app_name)
 {
@@ -194,8 +200,8 @@ Instance App::new_instance()
     create_info.pApplicationInfo = &(ins->vk_app_info_);
 #if COV_ENABLE_VALIDATION
     CHECK_VALIDATION_AVAILABLE();
-    create_info.enabledLayerCount = static_cast<uint32_t>(vck_validation_layers.size());
-    create_info.ppEnabledLayerNames = vck_validation_layers.data();
+    create_info.enabledLayerCount = static_cast<uint32_t>(cov_validation_layers.size());
+    create_info.ppEnabledLayerNames = cov_validation_layers.data();
 #else // COV_ENABLE_VALIDATION
     create_info.enabledLayerCount = 0;
 #endif // COV_ENABLE_VALIDATION
@@ -303,6 +309,27 @@ void Instance::destroy()
     if (device_ && cmd_pool_) {
         vkDestroyCommandPool(device_, cmd_pool_, nullptr);
     }
+
+    if (host_buff_) {
+        vkDestroyBuffer(device_, host_buff_, nullptr);
+    }
+
+    if (device_buff_) {
+        vkDestroyBuffer(device_, device_buff_, nullptr);
+    }
+
+    if (host_memory_) {
+        vkFreeMemory(device_, host_memory_, nullptr);
+    }
+
+    if (device_memory_) {
+        vkFreeMemory(device_, device_memory_, nullptr);
+    }
+
+    if (shader_module_) {
+        vkDestroyShaderModule(device_, shader_module_, nullptr);
+    }
+
     if (device_) {
         vkDestroyDevice(device_, nullptr);
     }
@@ -323,16 +350,15 @@ bool Instance::to_device(const void* data, size_t size)
         void* mapped_data;
         vkMapMemory(device_, host_memory_, 0, size, 0, &mapped_data);
         memcpy(mapped_data, reinterpret_cast<const void*>(data), size);
+
+        VkMappedMemoryRange mem_range{};
+        mem_range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+        mem_range.size = size;
+        mem_range.offset = 0;
+        mem_range.memory = host_memory_;
+        COV_CHECK_ASSERT(vkFlushMappedMemoryRanges(device_, 1, &mem_range));
         vkUnmapMemory(device_, host_memory_);
     }
-
-    VkMappedMemoryRange mem_range{};
-    mem_range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-    mem_range.size = size;
-    mem_range.offset = 0;
-    mem_range.memory = host_memory_;
-    COV_CHECK_ASSERT(vkFlushMappedMemoryRanges(device_, 1, &mem_range));
-    vkUnmapMemory(device_, host_memory_);
 
     create_buffer(device_, phy_device_, size,
         VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
@@ -463,9 +489,9 @@ void Instance::add_spec_item(uint32_t const_id, uint32_t offset, size_t item_siz
 bool Instance::execute()
 {
     VkDescriptorPool desc_pool{};
-    VkDescriptorSetLayout desc_set_layout{};
     VkPipelineLayout pipeline_layout{};
-    VkDescriptorSet desc_set{};
+    std::vector<VkDescriptorSetLayout> desc_set_layout(3);
+    std::vector<VkDescriptorSet> desc_set(3);
     VkPipelineCache pipeline_cache{};
     VkPipeline comp_pipeline{};
 
@@ -474,18 +500,18 @@ bool Instance::execute()
     }
 
     std::vector<VkDescriptorPoolSize> pool_sizes{
-        VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .descriptorCount = 1}
+        VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .descriptorCount = 3}
     };
     VkDescriptorPoolCreateInfo pool_create_info{};
     pool_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     pool_create_info.poolSizeCount = static_cast<uint32_t>(pool_sizes.size());
     pool_create_info.pPoolSizes = pool_sizes.data();
-    pool_create_info.maxSets = 1;
+    pool_create_info.maxSets = 3;
     COV_CHECK_ASSERT(vkCreateDescriptorPool(device_, &pool_create_info, nullptr, &desc_pool))
 
     std::vector<VkDescriptorSetLayoutBinding> set_layout_bindings{
         VkDescriptorSetLayoutBinding{
-            .binding = 0,
+            .binding = 7,
             .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
             .descriptorCount = 1,
             .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT
@@ -496,33 +522,58 @@ bool Instance::execute()
     layout_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     layout_create_info.bindingCount = static_cast<uint32_t>(set_layout_bindings.size());
     layout_create_info.pBindings = set_layout_bindings.data();
-    COV_CHECK_ASSERT(vkCreateDescriptorSetLayout(device_, &layout_create_info, nullptr, &desc_set_layout))
+    COV_CHECK_ASSERT(vkCreateDescriptorSetLayout(device_, &layout_create_info, nullptr, &desc_set_layout[0]))
+    COV_CHECK_ASSERT(vkCreateDescriptorSetLayout(device_, &layout_create_info, nullptr, &desc_set_layout[1]))
+    COV_CHECK_ASSERT(vkCreateDescriptorSetLayout(device_, &layout_create_info, nullptr, &desc_set_layout[2]))
 
     VkPipelineLayoutCreateInfo pipeline_create_info{};
     pipeline_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipeline_create_info.setLayoutCount = 1;
-    pipeline_create_info.pSetLayouts = &desc_set_layout;
+    pipeline_create_info.setLayoutCount = desc_set_layout.size();
+    pipeline_create_info.pSetLayouts = desc_set_layout.data();
     COV_CHECK_ASSERT(vkCreatePipelineLayout(device_, &pipeline_create_info, nullptr, &pipeline_layout))
 
     VkDescriptorSetAllocateInfo desc_alloc_info{};
     desc_alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    desc_alloc_info.descriptorSetCount = 1;
+    desc_alloc_info.descriptorSetCount = 3;
     desc_alloc_info.descriptorPool = desc_pool;
-    desc_alloc_info.pSetLayouts = &desc_set_layout;
-    COV_CHECK_ASSERT(vkAllocateDescriptorSets(device_, &desc_alloc_info, &desc_set))
+    desc_alloc_info.pSetLayouts = desc_set_layout.data();
+    COV_CHECK_ASSERT(vkAllocateDescriptorSets(device_, &desc_alloc_info, desc_set.data()))
 
-    VkDescriptorBufferInfo desc_buff_info{};
-    desc_buff_info.range = VK_WHOLE_SIZE;
-    desc_buff_info.offset = 0;
-    desc_buff_info.buffer = device_buff_;
+    std::vector<VkDescriptorBufferInfo> desc_buff_info(3);
+    desc_buff_info[0].range = VK_WHOLE_SIZE;
+    desc_buff_info[0].offset = 0;
+    desc_buff_info[0].buffer = device_buff_;
+    desc_buff_info[1].range = VK_WHOLE_SIZE;
+    desc_buff_info[1].offset = 16;
+    desc_buff_info[1].buffer = device_buff_;
+    desc_buff_info[2].range = VK_WHOLE_SIZE;
+    desc_buff_info[2].offset = 32;
+    desc_buff_info[2].buffer = device_buff_;
+
     std::vector<VkWriteDescriptorSet> write_desc_set{
         VkWriteDescriptorSet{
             .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet = desc_set,
-            .dstBinding = 0,
+            .dstSet = desc_set[0],
+            .dstBinding = 7,
             .descriptorCount = 1,
             .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-            .pBufferInfo = &desc_buff_info
+            .pBufferInfo = &desc_buff_info[0]
+        },
+        VkWriteDescriptorSet{
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = desc_set[1],
+            .dstBinding = 7,
+            .descriptorCount = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            .pBufferInfo = &desc_buff_info[1]
+        },
+        VkWriteDescriptorSet{
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = desc_set[2],
+            .dstBinding = 7,
+            .descriptorCount = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            .pBufferInfo = &desc_buff_info[2]
         }
     };
     vkUpdateDescriptorSets(device_, write_desc_set.size(), write_desc_set.data(), 0, nullptr);
@@ -582,7 +633,7 @@ bool Instance::execute()
         0, nullptr);
 
     vkCmdBindPipeline(cmd_buff, VK_PIPELINE_BIND_POINT_COMPUTE, comp_pipeline);
-    vkCmdBindDescriptorSets(cmd_buff, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_layout, 0, 1, &desc_set, 0, nullptr);
+    vkCmdBindDescriptorSets(cmd_buff, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_layout, 0, 3, desc_set.data(), 0, nullptr);
     vkCmdDispatch(cmd_buff, 8, 1, 1);
 
     // mem_buff_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -608,6 +659,16 @@ bool Instance::execute()
     COV_CHECK_ASSERT(vkQueueSubmit(queue_, 1, &submit_info, fence))
     COV_CHECK_ASSERT(vkWaitForFences(device_, 1, &fence, VK_TRUE, UINT64_MAX))
 
+
+    vkDestroyPipelineCache(device_, pipeline_cache, nullptr);
+    vkDestroyFence(device_, fence, nullptr);
+    vkDestroyPipelineLayout(device_, pipeline_layout, nullptr);
+    vkDestroyPipeline(device_, comp_pipeline, nullptr);
+    vkDestroyDescriptorPool(device_, desc_pool, nullptr);
+    for (auto dsl : desc_set_layout) {
+        vkDestroyDescriptorSetLayout(device_, dsl, nullptr);
+    }
+
     return true;
 }
 
@@ -624,24 +685,46 @@ bool Instance::init_command_pool(VkDevice device, uint32_t queue_index, VkComman
     return true;
 }
 
-Extensions::Extensions()
+LayerExtensions::LayerExtensions()
 {
     uint32_t count;
     vkEnumerateInstanceExtensionProperties(nullptr, &count, nullptr);
     exts_.resize(count);
     vkEnumerateInstanceExtensionProperties(nullptr, &count, exts_.data());
+
+    vkEnumerateInstanceLayerProperties(&count, nullptr);
+    layers_.resize(count);
+    vkEnumerateInstanceLayerProperties(&count, layers_.data());
 }
 
-const std::vector<VkExtensionProperties>& Extensions::get()
+const std::vector<VkExtensionProperties>& LayerExtensions::get_exts()
 {
     return instance()->exts_;
 }
 
-bool Extensions::has(const char* ext_name)
+const std::vector<VkLayerProperties>& LayerExtensions::get_layers()
 {
-    const auto& exts{get()};
+    return instance()->layers_;
+}
+
+bool LayerExtensions::has_ext(const char* ext_name)
+{
+    const auto& exts{get_exts()};
     for (const auto& ext: exts) {
+        std::cout << ext.extensionName << "\n";
         if (std::strcmp(ext_name, ext.extensionName) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool LayerExtensions::has_layer(const char* layer_name)
+{
+    const auto& layers{get_layers()};
+    for (const auto& layer: layers) {
+        std::cout << layer.layerName << "\n";
+        if (std::strcmp(layer_name, layer.layerName) == 0) {
             return true;
         }
     }
@@ -737,8 +820,8 @@ bool Device::create(VkPhysicalDevice phy_device, uint32_t queue_index, VkDevice&
     create_info.pEnabledFeatures = &device_features;
 #if COV_ENABLE_VALIDATION
     CHECK_VALIDATION_AVAILABLE();
-    create_info.ppEnabledLayerNames = vck_validation_layers.data();
-    create_info.enabledLayerCount = static_cast<uint32_t>(vck_validation_layers.size());
+    create_info.ppEnabledLayerNames = cov_validation_layers.data();
+    create_info.enabledLayerCount = static_cast<uint32_t>(cov_validation_layers.size());
 #else // COV_ENABLE_VALIDATION
     create_info.enabledLayerCount = 0;
 #endif // COV_ENABLE_VALIDATION
