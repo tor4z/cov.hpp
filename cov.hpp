@@ -62,7 +62,7 @@ public:
     bool to_host(void* data, size_t size);
     bool load_shader(const std::string& shader_path, void* spec_data=nullptr, size_t spec_data_len=0);
     void add_spec_item(uint32_t const_id, uint32_t offset, size_t item_size);
-    bool execute();
+    bool execute(int dims[3]);
     void destroy();
 private:
     VkInstance vk_instance_;
@@ -486,7 +486,7 @@ void Instance::add_spec_item(uint32_t const_id, uint32_t offset, size_t item_siz
     spec_info_.pMapEntries = spec_map_entryies_.data();
 }
 
-bool Instance::execute()
+bool Instance::execute(int dims[3])
 {
     VkDescriptorPool desc_pool{};
     VkPipelineLayout pipeline_layout{};
@@ -634,7 +634,7 @@ bool Instance::execute()
 
     vkCmdBindPipeline(cmd_buff, VK_PIPELINE_BIND_POINT_COMPUTE, comp_pipeline);
     vkCmdBindDescriptorSets(cmd_buff, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_layout, 0, 3, desc_set.data(), 0, nullptr);
-    vkCmdDispatch(cmd_buff, 8, 1, 1);
+    vkCmdDispatch(cmd_buff, dims[0], dims[1], dims[2]);
 
     // mem_buff_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     // mem_buff_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
