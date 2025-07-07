@@ -1,15 +1,11 @@
 #version 450
 
-layout(set = 0, binding = 7) buffer Pos {
-   uint values[ ];
+layout(set = 0, binding = 0) buffer Pos {
+   uint in_values[ ];
 };
 
-layout(set = 1, binding = 7) buffer Pos1 {
-   uint values1[ ];
-};
-
-layout(set = 2, binding = 7) buffer Pos2 {
-   uint values2[ ];
+layout(set = 1, binding = 0) buffer Pos2 {
+   uint out_values[ ];
 };
 
 layout (local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
@@ -35,5 +31,5 @@ void main()
 	uint index = gl_GlobalInvocationID.x;
 	if (index >= BUFFER_ELEMENTS) 
 		return;	
-	values1[index] = fibonacci(values1[index]);
+	out_values[index] = fibonacci(in_values[index]);
 }

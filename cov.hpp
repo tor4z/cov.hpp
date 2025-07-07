@@ -2,10 +2,10 @@
 #define COV_H_
 
 #include <mutex>
+#include <array>
 #include <optional>
 #include <vector>
 #include <vulkan/vulkan.h>
-#include <vulkan/vulkan_core.h>
 
 #define COV_DEF_SINGLETON(classname)                                            \
     static inline classname* instance()                                         \
@@ -58,25 +58,29 @@ public:
     Instance(Instance&&);
     Instance& operator=(Instance&&);
 
-    bool to_device(const void* data, size_t size);
-    bool to_host(void* data, size_t size);
+    bool set_input(const void* data, size_t size);
+    void set_output(size_t size);
+    bool get_output(void* data, size_t size);
     bool load_shader(const std::string& shader_path, void* spec_data=nullptr, size_t spec_data_len=0);
     void add_spec_item(uint32_t const_id, uint32_t offset, size_t item_size);
-    bool execute(int dims[3]);
+    bool execute(const std::array<int, 3> dims);
     void destroy();
 private:
     VkInstance vk_instance_;
     VkCommandPool cmd_pool_;
-    VkBuffer host_buff_;
-    VkDeviceMemory host_memory_;
-    VkBuffer device_buff_;
-    VkDeviceMemory device_memory_;
+    VkBuffer in_host_buff_;
+    VkDeviceMemory in_host_memory_;
+    VkBuffer in_device_buff_;
+    VkDeviceMemory in_device_memory_;
+    VkBuffer out_host_buff_;
+    VkDeviceMemory out_host_memory_;
+    VkBuffer out_device_buff_;
+    VkDeviceMemory out_device_memory_;
     VkQueue queue_;
     VkPhysicalDevice phy_device_;
     VkDevice device_;
     VkShaderModule shader_module_;
     VkSpecializationInfo spec_info_;
-    VkDebugUtilsMessengerEXT debug_messenger_;
     std::vector<VkSpecializationMapEntry> spec_map_entryies_;
     uint32_t queue_index_;
 
@@ -214,10 +218,14 @@ Instance App::new_instance()
 Instance::Instance(VkInstance vk_instance)
     : vk_instance_(vk_instance)
     , cmd_pool_(VK_NULL_HANDLE)
-    , host_buff_(VK_NULL_HANDLE)
-    , host_memory_(VK_NULL_HANDLE)
-    , device_buff_(VK_NULL_HANDLE)
-    , device_memory_(VK_NULL_HANDLE)
+    , in_host_buff_(VK_NULL_HANDLE)
+    , in_host_memory_(VK_NULL_HANDLE)
+    , in_device_buff_(VK_NULL_HANDLE)
+    , in_device_memory_(VK_NULL_HANDLE)
+    , out_host_buff_(VK_NULL_HANDLE)
+    , out_host_memory_(VK_NULL_HANDLE)
+    , out_device_buff_(VK_NULL_HANDLE)
+    , out_device_memory_(VK_NULL_HANDLE)
     , queue_(VK_NULL_HANDLE)
     , phy_device_(VK_NULL_HANDLE)
     , device_(VK_NULL_HANDLE)
@@ -241,10 +249,14 @@ Instance::Instance(Instance&& other)
 {
     vk_instance_ = other.vk_instance_;
     cmd_pool_ = other.cmd_pool_;
-    host_buff_ = other.host_buff_;
-    host_memory_ = other.host_memory_;
-    device_buff_ = other.device_buff_;
-    device_memory_ = other.device_memory_;
+    in_host_buff_ = other.in_host_buff_;
+    in_host_memory_ = other.in_host_memory_;
+    in_device_buff_ = other.in_device_buff_;
+    in_device_memory_ = other.in_device_memory_;
+    out_host_buff_ = other.out_host_buff_;
+    out_host_memory_ = other.out_host_memory_;
+    out_device_buff_ = other.out_device_buff_;
+    out_device_memory_ = other.out_device_memory_;
     queue_ = other.queue_;
     phy_device_ = other.phy_device_;
     device_ = other.device_;
@@ -255,10 +267,14 @@ Instance::Instance(Instance&& other)
 
     other.vk_instance_ = VK_NULL_HANDLE;
     other.cmd_pool_ = VK_NULL_HANDLE;
-    other.host_buff_ = VK_NULL_HANDLE;
-    other.host_memory_ = VK_NULL_HANDLE;
-    other.device_buff_ = VK_NULL_HANDLE;
-    other.device_memory_ = VK_NULL_HANDLE;
+    other.in_host_buff_ = VK_NULL_HANDLE;
+    other.in_host_memory_ = VK_NULL_HANDLE;
+    other.in_device_buff_ = VK_NULL_HANDLE;
+    other.in_device_memory_ = VK_NULL_HANDLE;
+    other.out_host_buff_ = VK_NULL_HANDLE;
+    other.out_host_memory_ = VK_NULL_HANDLE;
+    other.out_device_buff_ = VK_NULL_HANDLE;
+    other.out_device_memory_ = VK_NULL_HANDLE;
     other.queue_ = VK_NULL_HANDLE;
     other.phy_device_ = VK_NULL_HANDLE;
     other.device_ = VK_NULL_HANDLE;
@@ -276,10 +292,14 @@ Instance& Instance::operator=(Instance&& other)
     destroy();
     vk_instance_ = other.vk_instance_;
     cmd_pool_ = other.cmd_pool_;
-    host_buff_ = other.host_buff_;
-    host_memory_ = other.host_memory_;
-    device_buff_ = other.device_buff_;
-    device_memory_ = other.device_memory_;
+    in_host_buff_ = other.in_host_buff_;
+    in_host_memory_ = other.in_host_memory_;
+    in_device_buff_ = other.in_device_buff_;
+    in_device_memory_ = other.in_device_memory_;
+    out_host_buff_ = other.out_host_buff_;
+    out_host_memory_ = other.out_host_memory_;
+    out_device_buff_ = other.out_device_buff_;
+    out_device_memory_ = other.out_device_memory_;
     queue_ = other.queue_;
     phy_device_ = other.phy_device_;
     device_ = other.device_;
@@ -290,10 +310,14 @@ Instance& Instance::operator=(Instance&& other)
 
     other.vk_instance_ = VK_NULL_HANDLE;
     other.cmd_pool_ = VK_NULL_HANDLE;
-    other.host_buff_ = VK_NULL_HANDLE;
-    other.host_memory_ = VK_NULL_HANDLE;
-    other.device_buff_ = VK_NULL_HANDLE;
-    other.device_memory_ = VK_NULL_HANDLE;
+    other.in_host_buff_ = VK_NULL_HANDLE;
+    other.in_host_memory_ = VK_NULL_HANDLE;
+    other.in_device_buff_ = VK_NULL_HANDLE;
+    other.in_device_memory_ = VK_NULL_HANDLE;
+    other.out_host_buff_ = VK_NULL_HANDLE;
+    other.out_host_memory_ = VK_NULL_HANDLE;
+    other.out_device_buff_ = VK_NULL_HANDLE;
+    other.out_device_memory_ = VK_NULL_HANDLE;
     other.queue_ = VK_NULL_HANDLE;
     other.phy_device_ = VK_NULL_HANDLE;
     other.device_ = VK_NULL_HANDLE;
@@ -310,20 +334,36 @@ void Instance::destroy()
         vkDestroyCommandPool(device_, cmd_pool_, nullptr);
     }
 
-    if (host_buff_) {
-        vkDestroyBuffer(device_, host_buff_, nullptr);
+    if (in_host_buff_) {
+        vkDestroyBuffer(device_, in_host_buff_, nullptr);
     }
 
-    if (device_buff_) {
-        vkDestroyBuffer(device_, device_buff_, nullptr);
+    if (in_device_buff_) {
+        vkDestroyBuffer(device_, in_device_buff_, nullptr);
     }
 
-    if (host_memory_) {
-        vkFreeMemory(device_, host_memory_, nullptr);
+    if (in_host_memory_) {
+        vkFreeMemory(device_, in_host_memory_, nullptr);
     }
 
-    if (device_memory_) {
-        vkFreeMemory(device_, device_memory_, nullptr);
+    if (in_device_memory_) {
+        vkFreeMemory(device_, in_device_memory_, nullptr);
+    }
+
+    if (out_host_buff_) {
+        vkDestroyBuffer(device_, out_host_buff_, nullptr);
+    }
+
+    if (out_device_buff_) {
+        vkDestroyBuffer(device_, out_device_buff_, nullptr);
+    }
+
+    if (out_host_memory_) {
+        vkFreeMemory(device_, out_host_memory_, nullptr);
+    }
+
+    if (out_device_memory_) {
+        vkFreeMemory(device_, out_device_memory_, nullptr);
     }
 
     if (shader_module_) {
@@ -340,29 +380,28 @@ void Instance::destroy()
     spec_map_entryies_.clear();
 }
 
-bool Instance::to_device(const void* data, size_t size)
+bool Instance::set_input(const void* data, size_t size)
 {
     create_buffer(device_, phy_device_, size,
         VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, host_buff_, host_memory_);
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, in_host_buff_, in_host_memory_);
+    create_buffer(device_, phy_device_, size,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, in_device_buff_, in_device_memory_);
 
     if (data) {
         void* mapped_data;
-        vkMapMemory(device_, host_memory_, 0, size, 0, &mapped_data);
+        vkMapMemory(device_, in_host_memory_, 0, size, 0, &mapped_data);
         memcpy(mapped_data, reinterpret_cast<const void*>(data), size);
 
         VkMappedMemoryRange mem_range{};
         mem_range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
         mem_range.size = size;
         mem_range.offset = 0;
-        mem_range.memory = host_memory_;
+        mem_range.memory = in_host_memory_;
         COV_CHECK_ASSERT(vkFlushMappedMemoryRanges(device_, 1, &mem_range));
-        vkUnmapMemory(device_, host_memory_);
+        vkUnmapMemory(device_, in_host_memory_);
     }
-
-    create_buffer(device_, phy_device_, size,
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, device_buff_, device_memory_);
 
     VkCommandBufferAllocateInfo cmd_alloc_info{};
     cmd_alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -378,7 +417,7 @@ bool Instance::to_device(const void* data, size_t size)
     COV_CHECK_ASSERT(vkBeginCommandBuffer(cmd_buff, &cmd_begin_info));
     VkBufferCopy copy_region{};
     copy_region.size = size;
-    vkCmdCopyBuffer(cmd_buff, host_buff_, device_buff_, 1, &copy_region);
+    vkCmdCopyBuffer(cmd_buff, in_host_buff_, in_device_buff_, 1, &copy_region);
     COV_CHECK_ASSERT(vkEndCommandBuffer(cmd_buff));
 
     // submmit
@@ -400,7 +439,18 @@ bool Instance::to_device(const void* data, size_t size)
     return true;
 }
 
-bool Instance::to_host(void* data, size_t size)
+void Instance::set_output(size_t size)
+{
+    create_buffer(device_, phy_device_, size,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, out_host_buff_, out_host_memory_);
+    create_buffer(device_, phy_device_, size,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, out_device_buff_, out_device_memory_);
+}
+
+
+bool Instance::get_output(void* data, size_t size)
 {
     VkCommandBufferAllocateInfo cmd_alloc_info{};
     cmd_alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -417,7 +467,7 @@ bool Instance::to_host(void* data, size_t size)
     COV_CHECK_ASSERT(vkBeginCommandBuffer(cmd_buff, &begin_info))
     VkBufferCopy copy_region{};
     copy_region.size = size;
-    vkCmdCopyBuffer(cmd_buff, device_buff_, host_buff_, 1, &copy_region);
+    vkCmdCopyBuffer(cmd_buff, out_device_buff_, out_host_buff_, 1, &copy_region);
     COV_CHECK_ASSERT(vkEndCommandBuffer(cmd_buff))
 
     // submit
@@ -438,9 +488,9 @@ bool Instance::to_host(void* data, size_t size)
     vkFreeCommandBuffers(device_, cmd_pool_, 1, &cmd_buff);
 
     void* mapped_data;
-    vkMapMemory(device_, host_memory_, 0, size, 0, &mapped_data);
+    vkMapMemory(device_, out_host_memory_, 0, size, 0, &mapped_data);
     memcpy(data, mapped_data, size);
-    vkUnmapMemory(device_, host_memory_);
+    vkUnmapMemory(device_, out_host_memory_);
     return true;
 }
 
@@ -486,12 +536,12 @@ void Instance::add_spec_item(uint32_t const_id, uint32_t offset, size_t item_siz
     spec_info_.pMapEntries = spec_map_entryies_.data();
 }
 
-bool Instance::execute(int dims[3])
+bool Instance::execute(const std::array<int, 3> dims)
 {
     VkDescriptorPool desc_pool{};
     VkPipelineLayout pipeline_layout{};
-    std::vector<VkDescriptorSetLayout> desc_set_layout(3);
-    std::vector<VkDescriptorSet> desc_set(3);
+    std::vector<VkDescriptorSetLayout> desc_set_layout(2);
+    std::vector<VkDescriptorSet> desc_set(2);
     VkPipelineCache pipeline_cache{};
     VkPipeline comp_pipeline{};
 
@@ -500,18 +550,18 @@ bool Instance::execute(int dims[3])
     }
 
     std::vector<VkDescriptorPoolSize> pool_sizes{
-        VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .descriptorCount = 3}
+        VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .descriptorCount = 4}
     };
     VkDescriptorPoolCreateInfo pool_create_info{};
     pool_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     pool_create_info.poolSizeCount = static_cast<uint32_t>(pool_sizes.size());
     pool_create_info.pPoolSizes = pool_sizes.data();
-    pool_create_info.maxSets = 3;
+    pool_create_info.maxSets = 2;
     COV_CHECK_ASSERT(vkCreateDescriptorPool(device_, &pool_create_info, nullptr, &desc_pool))
 
     std::vector<VkDescriptorSetLayoutBinding> set_layout_bindings{
         VkDescriptorSetLayoutBinding{
-            .binding = 7,
+            .binding = 0,
             .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
             .descriptorCount = 1,
             .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT
@@ -524,7 +574,6 @@ bool Instance::execute(int dims[3])
     layout_create_info.pBindings = set_layout_bindings.data();
     COV_CHECK_ASSERT(vkCreateDescriptorSetLayout(device_, &layout_create_info, nullptr, &desc_set_layout[0]))
     COV_CHECK_ASSERT(vkCreateDescriptorSetLayout(device_, &layout_create_info, nullptr, &desc_set_layout[1]))
-    COV_CHECK_ASSERT(vkCreateDescriptorSetLayout(device_, &layout_create_info, nullptr, &desc_set_layout[2]))
 
     VkPipelineLayoutCreateInfo pipeline_create_info{};
     pipeline_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -534,27 +583,25 @@ bool Instance::execute(int dims[3])
 
     VkDescriptorSetAllocateInfo desc_alloc_info{};
     desc_alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    desc_alloc_info.descriptorSetCount = 3;
+    desc_alloc_info.descriptorSetCount = 2;
     desc_alloc_info.descriptorPool = desc_pool;
     desc_alloc_info.pSetLayouts = desc_set_layout.data();
     COV_CHECK_ASSERT(vkAllocateDescriptorSets(device_, &desc_alloc_info, desc_set.data()))
 
-    std::vector<VkDescriptorBufferInfo> desc_buff_info(3);
+    std::vector<VkDescriptorBufferInfo> desc_buff_info(2);
     desc_buff_info[0].range = VK_WHOLE_SIZE;
     desc_buff_info[0].offset = 0;
-    desc_buff_info[0].buffer = device_buff_;
+    desc_buff_info[0].buffer = in_device_buff_;
+
     desc_buff_info[1].range = VK_WHOLE_SIZE;
-    desc_buff_info[1].offset = 16;
-    desc_buff_info[1].buffer = device_buff_;
-    desc_buff_info[2].range = VK_WHOLE_SIZE;
-    desc_buff_info[2].offset = 32;
-    desc_buff_info[2].buffer = device_buff_;
+    desc_buff_info[1].offset = 0;
+    desc_buff_info[1].buffer = out_device_buff_;
 
     std::vector<VkWriteDescriptorSet> write_desc_set{
         VkWriteDescriptorSet{
             .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
             .dstSet = desc_set[0],
-            .dstBinding = 7,
+            .dstBinding = 0,
             .descriptorCount = 1,
             .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
             .pBufferInfo = &desc_buff_info[0]
@@ -562,18 +609,10 @@ bool Instance::execute(int dims[3])
         VkWriteDescriptorSet{
             .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
             .dstSet = desc_set[1],
-            .dstBinding = 7,
+            .dstBinding = 0,
             .descriptorCount = 1,
             .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
             .pBufferInfo = &desc_buff_info[1]
-        },
-        VkWriteDescriptorSet{
-            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet = desc_set[2],
-            .dstBinding = 7,
-            .descriptorCount = 1,
-            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-            .pBufferInfo = &desc_buff_info[2]
         }
     };
     vkUpdateDescriptorSets(device_, write_desc_set.size(), write_desc_set.data(), 0, nullptr);
@@ -622,7 +661,7 @@ bool Instance::execute(int dims[3])
     mem_buff_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
     mem_buff_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     mem_buff_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    mem_buff_barrier.buffer = device_buff_;
+    mem_buff_barrier.buffer = in_device_buff_;
     mem_buff_barrier.size = VK_WHOLE_SIZE;
     mem_buff_barrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
     mem_buff_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
@@ -633,7 +672,7 @@ bool Instance::execute(int dims[3])
         0, nullptr);
 
     vkCmdBindPipeline(cmd_buff, VK_PIPELINE_BIND_POINT_COMPUTE, comp_pipeline);
-    vkCmdBindDescriptorSets(cmd_buff, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_layout, 0, 3, desc_set.data(), 0, nullptr);
+    vkCmdBindDescriptorSets(cmd_buff, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_layout, 0, 2, desc_set.data(), 0, nullptr);
     vkCmdDispatch(cmd_buff, dims[0], dims[1], dims[2]);
 
     // mem_buff_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -649,7 +688,6 @@ bool Instance::execute(int dims[3])
     COV_CHECK_ASSERT(vkEndCommandBuffer(cmd_buff))
     vkResetFences(device_, 1, &fence);
 
-
     const VkPipelineStageFlags wait_stage_mask{VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT};
     VkSubmitInfo submit_info{};
     submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -658,7 +696,6 @@ bool Instance::execute(int dims[3])
     submit_info.pWaitDstStageMask = &wait_stage_mask;
     COV_CHECK_ASSERT(vkQueueSubmit(queue_, 1, &submit_info, fence))
     COV_CHECK_ASSERT(vkWaitForFences(device_, 1, &fence, VK_TRUE, UINT64_MAX))
-
 
     vkDestroyPipelineCache(device_, pipeline_cache, nullptr);
     vkDestroyFence(device_, fence, nullptr);
