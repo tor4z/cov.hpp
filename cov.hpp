@@ -5,6 +5,7 @@
 #include <array>
 #include <optional>
 #include <vector>
+#include <string_view>
 #include <vulkan/vulkan.h>
 
 #define COV_DEF_SINGLETON(classname)                                            \
@@ -61,7 +62,7 @@ public:
     bool set_input(const void* data, size_t size);
     void set_output(size_t size);
     bool get_output(void* data, size_t size);
-    bool load_shader(const std::string& shader_path, void* spec_data=nullptr, size_t spec_data_len=0);
+    bool load_shader(const std::string_view& shader_path, void* spec_data=nullptr, size_t spec_data_len=0);
     void add_spec_item(uint32_t const_id, uint32_t offset, size_t item_size);
     bool execute(const std::array<int, 3> dims);
     void destroy();
@@ -494,9 +495,9 @@ bool Instance::get_output(void* data, size_t size)
     return true;
 }
 
-bool Instance::load_shader(const std::string& shader_path, void* spec_data, size_t spec_data_len)
+bool Instance::load_shader(const std::string_view& shader_path, void* spec_data, size_t spec_data_len)
 {
-    std::ifstream ifs(shader_path, std::ios::in | std::ios::binary);
+    std::ifstream ifs(shader_path.data(), std::ios::in | std::ios::binary);
     if (ifs.is_open()) {
         ifs.seekg(0, std::ios::end);
         const auto size{ifs.tellg()};
@@ -748,7 +749,6 @@ bool LayerExtensions::has_ext(const char* ext_name)
 {
     const auto& exts{get_exts()};
     for (const auto& ext: exts) {
-        std::cout << ext.extensionName << "\n";
         if (std::strcmp(ext_name, ext.extensionName) == 0) {
             return true;
         }
@@ -760,7 +760,6 @@ bool LayerExtensions::has_layer(const char* layer_name)
 {
     const auto& layers{get_layers()};
     for (const auto& layer: layers) {
-        std::cout << layer.layerName << "\n";
         if (std::strcmp(layer_name, layer.layerName) == 0) {
             return true;
         }
