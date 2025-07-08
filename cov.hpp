@@ -6,6 +6,7 @@
 #include <optional>
 #include <vector>
 #include <string_view>
+#include <utility>
 #include <vulkan/vulkan.h>
 
 #define COV_DEF_SINGLETON(classname)                                            \
@@ -50,6 +51,10 @@ private:
 
 class Instance
 {
+    struct InputSet {
+        size_t offset;
+        size_t size;
+    }; // struct InputSet
 public:
     ~Instance() { destroy(); }
     // not copiable
@@ -59,8 +64,8 @@ public:
     Instance(Instance&&);
     Instance& operator=(Instance&&);
 
-    bool set_input(const void* data, size_t size);
-    void set_output(size_t size);
+    bool set_inputs(const std::vector<std::pair<const void*, size_t>>& inputs);
+    void def_output(size_t size);
     bool get_output(void* data, size_t size);
     bool load_shader(const std::string_view& shader_path, void* spec_data=nullptr, size_t spec_data_len=0);
     void add_spec_item(uint32_t const_id, uint32_t offset, size_t item_size);
@@ -83,7 +88,10 @@ private:
     VkShaderModule shader_module_;
     VkSpecializationInfo spec_info_;
     std::vector<VkSpecializationMapEntry> spec_map_entryies_;
+    std::vector<InputSet> input_sets_;
     uint32_t queue_index_;
+    size_t input_size_;
+    size_t output_size_;
 
     friend class App;
     Instance(VkInstance vk_instance);
@@ -232,6 +240,8 @@ Instance::Instance(VkInstance vk_instance)
     , device_(VK_NULL_HANDLE)
     , shader_module_(VK_NULL_HANDLE)
     , queue_index_(-1)
+    , input_size_(0)
+    , output_size_(0)
 {
     PhysicalDevice physical_device_creator;
     Device device_creator;
@@ -265,6 +275,9 @@ Instance::Instance(Instance&& other)
     queue_index_ = other.queue_index_;
     spec_info_ = other.spec_info_;
     spec_map_entryies_ = other.spec_map_entryies_;
+    input_sets_ = other.input_sets_;
+    input_size_ = other.input_size_;
+    output_size_ = other.output_size_;
 
     other.vk_instance_ = VK_NULL_HANDLE;
     other.cmd_pool_ = VK_NULL_HANDLE;
@@ -282,6 +295,9 @@ Instance::Instance(Instance&& other)
     other.shader_module_ = VK_NULL_HANDLE;
     other.queue_index_ = -1;
     other.spec_map_entryies_.clear();
+    other.input_sets_.clear();
+    other.input_size_ = 0;
+    other.output_size_ = 0;
 }
 
 Instance& Instance::operator=(Instance&& other)
@@ -308,6 +324,9 @@ Instance& Instance::operator=(Instance&& other)
     queue_index_ = other.queue_index_;
     spec_info_ = other.spec_info_;
     spec_map_entryies_ = other.spec_map_entryies_;
+    input_sets_ = other.input_sets_;
+    input_size_ = other.input_size_;
+    output_size_ = other.output_size_;
 
     other.vk_instance_ = VK_NULL_HANDLE;
     other.cmd_pool_ = VK_NULL_HANDLE;
@@ -325,6 +344,9 @@ Instance& Instance::operator=(Instance&& other)
     other.shader_module_ = VK_NULL_HANDLE;
     other.queue_index_ = -1;
     other.spec_map_entryies_.clear();
+    other.input_sets_.clear();
+    other.input_size_ = 0;
+    other.output_size_ = 0;
 
     return *this;
 }
@@ -381,27 +403,39 @@ void Instance::destroy()
     spec_map_entryies_.clear();
 }
 
-bool Instance::set_input(const void* data, size_t size)
+bool Instance::set_inputs(const std::vector<std::pair<const void*, size_t>>& inputs)
 {
-    create_buffer(device_, phy_device_, size,
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, in_host_buff_, in_host_memory_);
-    create_buffer(device_, phy_device_, size,
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, in_device_buff_, in_device_memory_);
+    size_t all_size{0};
+    if (input_size_ == 0) {
+        size_t offset{0};
+        input_size_ = all_size;
+        for (const auto& input : inputs) {
+            input_sets_.emplace_back(InputSet{.offset = offset, .size = input.second});
+            all_size = offset + input.second;
+            offset = (input.second / 64 + 1) * 64;
+        }
 
-    if (data) {
-        void* mapped_data;
-        vkMapMemory(device_, in_host_memory_, 0, size, 0, &mapped_data);
-        memcpy(mapped_data, reinterpret_cast<const void*>(data), size);
+        create_buffer(device_, phy_device_, all_size,
+            VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, in_host_buff_, in_host_memory_);
+        create_buffer(device_, phy_device_, all_size,
+            VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, in_device_buff_, in_device_memory_);
+    } else {
+        assert(input_size_ == all_size && "Input size not matched");
+    }
 
+    {
         VkMappedMemoryRange mem_range{};
         mem_range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-        mem_range.size = size;
-        mem_range.offset = 0;
-        mem_range.memory = in_host_memory_;
-        COV_CHECK_ASSERT(vkFlushMappedMemoryRanges(device_, 1, &mem_range));
-        vkUnmapMemory(device_, in_host_memory_);
+
+        for (size_t i = 0; i < inputs.size(); ++i) {
+            void* mapped_data;
+            const auto& input{inputs.at(i)};
+            vkMapMemory(device_, in_host_memory_, input_sets_.at(i).offset, input.second, 0, &mapped_data);
+            memcpy(mapped_data, reinterpret_cast<const void*>(input.first), input.second);
+            vkUnmapMemory(device_, in_host_memory_);
+        }
     }
 
     VkCommandBufferAllocateInfo cmd_alloc_info{};
@@ -417,7 +451,7 @@ bool Instance::set_input(const void* data, size_t size)
     cmd_begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     COV_CHECK_ASSERT(vkBeginCommandBuffer(cmd_buff, &cmd_begin_info));
     VkBufferCopy copy_region{};
-    copy_region.size = size;
+    copy_region.size = all_size;
     vkCmdCopyBuffer(cmd_buff, in_host_buff_, in_device_buff_, 1, &copy_region);
     COV_CHECK_ASSERT(vkEndCommandBuffer(cmd_buff));
 
@@ -440,14 +474,17 @@ bool Instance::set_input(const void* data, size_t size)
     return true;
 }
 
-void Instance::set_output(size_t size)
+void Instance::def_output(size_t size)
 {
-    create_buffer(device_, phy_device_, size,
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, out_host_buff_, out_host_memory_);
-    create_buffer(device_, phy_device_, size,
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, out_device_buff_, out_device_memory_);
+    if (output_size_ == 0) {
+        output_size_ = size;
+        create_buffer(device_, phy_device_, size,
+            VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, out_host_buff_, out_host_memory_);
+        create_buffer(device_, phy_device_, size,
+            VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, out_device_buff_, out_device_memory_);
+    }
 }
 
 
@@ -539,10 +576,11 @@ void Instance::add_spec_item(uint32_t const_id, uint32_t offset, size_t item_siz
 
 bool Instance::execute(const std::array<int, 3> dims)
 {
+    auto num_sets{input_sets_.size() + 1};
     VkDescriptorPool desc_pool{};
     VkPipelineLayout pipeline_layout{};
-    std::vector<VkDescriptorSetLayout> desc_set_layout(2);
-    std::vector<VkDescriptorSet> desc_set(2);
+    std::vector<VkDescriptorSetLayout> desc_set_layout(num_sets);
+    std::vector<VkDescriptorSet> desc_set(num_sets);
     VkPipelineCache pipeline_cache{};
     VkPipeline comp_pipeline{};
 
@@ -557,7 +595,7 @@ bool Instance::execute(const std::array<int, 3> dims)
     pool_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     pool_create_info.poolSizeCount = static_cast<uint32_t>(pool_sizes.size());
     pool_create_info.pPoolSizes = pool_sizes.data();
-    pool_create_info.maxSets = 2;
+    pool_create_info.maxSets = num_sets;
     COV_CHECK_ASSERT(vkCreateDescriptorPool(device_, &pool_create_info, nullptr, &desc_pool))
 
     std::vector<VkDescriptorSetLayoutBinding> set_layout_bindings{
@@ -573,8 +611,9 @@ bool Instance::execute(const std::array<int, 3> dims)
     layout_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     layout_create_info.bindingCount = static_cast<uint32_t>(set_layout_bindings.size());
     layout_create_info.pBindings = set_layout_bindings.data();
-    COV_CHECK_ASSERT(vkCreateDescriptorSetLayout(device_, &layout_create_info, nullptr, &desc_set_layout[0]))
-    COV_CHECK_ASSERT(vkCreateDescriptorSetLayout(device_, &layout_create_info, nullptr, &desc_set_layout[1]))
+    for (size_t i = 0; i < num_sets; ++i) {
+        COV_CHECK_ASSERT(vkCreateDescriptorSetLayout(device_, &layout_create_info, nullptr, &desc_set_layout[i]))
+    }
 
     VkPipelineLayoutCreateInfo pipeline_create_info{};
     pipeline_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -584,39 +623,37 @@ bool Instance::execute(const std::array<int, 3> dims)
 
     VkDescriptorSetAllocateInfo desc_alloc_info{};
     desc_alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    desc_alloc_info.descriptorSetCount = 2;
+    desc_alloc_info.descriptorSetCount = num_sets;
     desc_alloc_info.descriptorPool = desc_pool;
     desc_alloc_info.pSetLayouts = desc_set_layout.data();
     COV_CHECK_ASSERT(vkAllocateDescriptorSets(device_, &desc_alloc_info, desc_set.data()))
 
-    std::vector<VkDescriptorBufferInfo> desc_buff_info(2);
-    desc_buff_info[0].range = VK_WHOLE_SIZE;
-    desc_buff_info[0].offset = 0;
-    desc_buff_info[0].buffer = in_device_buff_;
+    std::vector<VkDescriptorBufferInfo> desc_buff_info(num_sets);
 
-    desc_buff_info[1].range = VK_WHOLE_SIZE;
-    desc_buff_info[1].offset = 0;
-    desc_buff_info[1].buffer = out_device_buff_;
+    for (size_t i = 0; i < input_sets_.size(); ++i) {
+        const auto& input_set_info{input_sets_.at(i)};
+        desc_buff_info[i].range = VK_WHOLE_SIZE;
+        desc_buff_info[i].offset = input_set_info.offset;
+        desc_buff_info[i].buffer = in_device_buff_;
+    }
+    desc_buff_info[num_sets - 1].range = VK_WHOLE_SIZE;
+    desc_buff_info[num_sets - 1].offset = 0;
+    desc_buff_info[num_sets - 1].buffer = out_device_buff_;
 
-    std::vector<VkWriteDescriptorSet> write_desc_set{
-        VkWriteDescriptorSet{
+    std::vector<VkWriteDescriptorSet> write_desc_sets;
+    write_desc_sets.reserve(num_sets);
+    for (size_t i = 0; i < num_sets; ++i) {
+        write_desc_sets.emplace_back(VkWriteDescriptorSet{
             .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet = desc_set[0],
+            .dstSet = desc_set[i],
             .dstBinding = 0,
             .descriptorCount = 1,
             .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-            .pBufferInfo = &desc_buff_info[0]
-        },
-        VkWriteDescriptorSet{
-            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet = desc_set[1],
-            .dstBinding = 0,
-            .descriptorCount = 1,
-            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-            .pBufferInfo = &desc_buff_info[1]
-        }
-    };
-    vkUpdateDescriptorSets(device_, write_desc_set.size(), write_desc_set.data(), 0, nullptr);
+            .pBufferInfo = &desc_buff_info[i]
+        });
+    }
+
+    vkUpdateDescriptorSets(device_, write_desc_sets.size(), write_desc_sets.data(), 0, nullptr);
 
     VkPipelineCacheCreateInfo pipeline_cache_create_info{};
     pipeline_cache_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
@@ -673,7 +710,7 @@ bool Instance::execute(const std::array<int, 3> dims)
         0, nullptr);
 
     vkCmdBindPipeline(cmd_buff, VK_PIPELINE_BIND_POINT_COMPUTE, comp_pipeline);
-    vkCmdBindDescriptorSets(cmd_buff, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_layout, 0, 2, desc_set.data(), 0, nullptr);
+    vkCmdBindDescriptorSets(cmd_buff, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_layout, 0, num_sets, desc_set.data(), 0, nullptr);
     vkCmdDispatch(cmd_buff, dims[0], dims[1], dims[2]);
 
     // mem_buff_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;

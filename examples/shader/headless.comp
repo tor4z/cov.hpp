@@ -4,7 +4,11 @@ layout(set = 0, binding = 0) buffer Pos {
    uint in_values[ ];
 };
 
-layout(set = 1, binding = 0) buffer Pos2 {
+layout(set = 1, binding = 0) buffer Pos1 {
+   uint in_values1[ ];
+};
+
+layout(set = 2, binding = 0) buffer Pos2 {
    uint out_values[ ];
 };
 
