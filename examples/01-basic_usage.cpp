@@ -19,7 +19,7 @@ int main()
     const std::string shader_path{"../examples/shader/headless.comp.spv"};  // suppose we run this program on build dir
 
     // std::vector<int> in_data{1, 2, 3, 4, 5, 6, 7, 1, 2, 3, 4, 5, 6, 7};
-    std::vector<int> in_data{7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7};
+    std::vector<int> in_data{3, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7};
     std::vector<int> out_data(in_data.size());
     
     cov::App::init("HelloCOV");
