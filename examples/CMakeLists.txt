@@ -9,3 +9,13 @@ add_executable(basic_usage
 target_link_libraries(basic_usage
     vulkan
 )
+
+
+add_executable(matmul
+    02-matmul.cpp
+)
+
+target_link_libraries(matmul
+    vulkan
+)
+
