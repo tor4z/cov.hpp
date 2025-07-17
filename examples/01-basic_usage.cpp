@@ -1,8 +1,7 @@
-#include <algorithm>
-#include <array>
 #include <cstdint>
 #include <iostream>
 #include <vector>
+#include <string>
 
 #define COV_VULKAN_VALIDATION
 #define COV_IMPLEMENTATION

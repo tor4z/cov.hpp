@@ -36,5 +36,5 @@ void main()
 	uint index = gl_GlobalInvocationID.x;
 	if (index >= length) 
 		return;	
-	out_values[index] = fibonacci(in_values[index]);
+	out_values[index] = 2;//fibonacci(in_values[index]);
 }

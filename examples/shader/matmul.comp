@@ -28,12 +28,17 @@ void main()
 	uint index_x = gl_GlobalInvocationID.x;
 	uint index_y = gl_GlobalInvocationID.y;
 
-	if (index_x >= input_a_row) {
-		return;
-	}
-	if (index_y >= input_a_col) {
+	output_dims = input_a_dims;
+	output_col = input_b_col;
+	output_row = input_a_row;
+
+	if (index_x >= output_row || index_y >= output_col) {
 		return;
 	}
 
-	output_data[index_x * input_a_row + index_y] = input_a_data[index_x * input_a_row + index_y];
+	output_data[index_x * output_col + index_y] = 0.0;
+	for (uint i = 0; i < input_a_col; ++i) {
+		output_data[index_x * output_col + index_y] += input_a_data[index_x * input_a_col + i] *
+			input_b_data[i * input_b_col + index_y];
+	}
 }
