@@ -22,12 +22,11 @@ struct Mat
     size_t bytes();
     float at(int i) const;
     MatInitializer operator<<(float v);
-private:
-    friend std::ostream& operator<<(std::ostream& os, const Mat& mat);
 
-    int dims_;
-    int col_;
-    int row_;
+    const int dims;
+    const int col;
+    const int row;
+private:
     float* data_;
     int data_offset_;
     std::vector<char> byte_data_;

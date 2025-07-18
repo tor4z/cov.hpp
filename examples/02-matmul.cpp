@@ -28,7 +28,7 @@ int main()
         });
         instance.def_output(C.bytes());
 
-        if (!instance.execute({8, 8, 1})) {
+        if (!instance.execute({C.row, C.col, 1})) {
             std::cerr << "Execute shader program failed\n";
         }
         instance.get_output(C.ptr(), C.bytes());
