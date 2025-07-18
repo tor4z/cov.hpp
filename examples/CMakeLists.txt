@@ -13,6 +13,7 @@ target_link_libraries(basic_usage
 
 add_executable(matmul
     02-matmul.cpp
+    mat.cpp
 )
 
 target_link_libraries(matmul
