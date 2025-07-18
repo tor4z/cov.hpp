@@ -20,3 +20,12 @@ target_link_libraries(matmul
     vulkan
 )
 
+add_executable(multi_layer_matmul
+    03-multi_layer_matmul.cpp
+    mat.cpp
+)
+
+target_link_libraries(multi_layer_matmul
+    vulkan
+)
+

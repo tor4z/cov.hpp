@@ -8,6 +8,7 @@
 #include <string_view>
 #include <utility>
 #include <vulkan/vulkan.h>
+#include <vulkan/vulkan_core.h>
 
 #define COV_DEF_SINGLETON(classname)                                            \
     static inline classname* instance()                                         \
@@ -412,7 +413,7 @@ bool Instance::set_inputs(const std::vector<std::pair<const void*, size_t>>& inp
         for (const auto& input : inputs) {
             input_sets_.emplace_back(InputSet{.offset = offset, .size = input.second});
             all_size = offset + input.second;
-            offset = (input.second / 64 + 1) * 64;
+            offset += (input.second / 64 + 1) * 64;
         }
 
         create_buffer(device_, phy_device_, all_size,
@@ -589,7 +590,7 @@ bool Instance::execute(const std::array<int, 3> dims)
     }
 
     std::vector<VkDescriptorPoolSize> pool_sizes{
-        VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .descriptorCount = 4}
+        VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .descriptorCount = static_cast<uint32_t>(num_sets)}
     };
     VkDescriptorPoolCreateInfo pool_create_info{};
     pool_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -715,10 +716,10 @@ bool Instance::execute(const std::array<int, 3> dims)
 
     // mem_buff_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     // mem_buff_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    // mem_buff_barrier.buffer = device_buff;
+    // mem_buff_barrier.buffer = in_device_buff_;
     // mem_buff_barrier.size = VK_WHOLE_SIZE;
-    // mem_buff_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    // mem_buff_barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    // mem_buff_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    // mem_buff_barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
     // vkCmdPipelineBarrier(cmd_buff, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
     //     0, nullptr,
     //     1, &mem_buff_barrier,
