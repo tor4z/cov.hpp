@@ -32,14 +32,12 @@ shared float shared_data[64];
 
 layout (local_size_x = 4, local_size_y = 4, local_size_z = 1) in;
 
-void main() 
+
+void layer1()
 {
 	uint index_x = gl_GlobalInvocationID.x;
 	uint index_y = gl_GlobalInvocationID.y;
 
-	output_dims = input_a_dims;
-	output_col = input_b_col;
-	output_row = input_a_row;
 
 	if (index_x >= output_row || index_y >= output_col) {
 		return;
@@ -51,11 +49,31 @@ void main()
 			input_b_data[i * input_b_col + index_y];
 	}
 
-	barrier();
+}
+
+void layer2()
+{
+	uint index_x = gl_GlobalInvocationID.x;
+	uint index_y = gl_GlobalInvocationID.y;
+
+	if (index_x >= output_row || index_y >= output_col) {
+		return;
+	}
 
 	output_data[index_x * output_col + index_y] = 0.0;
 	for (uint i = 0; i < input_c_row; ++i) {
 		output_data[index_x * output_col + index_y] += shared_data[index_x * input_b_col + i] *
 			input_c_data[i * input_c_col + index_y];
 	}
+}
+
+void main() 
+{
+	output_dims = input_a_dims;
+	output_col = input_b_col;
+	output_row = input_a_row;
+
+	layer1();
+	barrier();
+	layer2();
 }
