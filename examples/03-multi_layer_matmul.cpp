@@ -9,7 +9,8 @@ int main()
 {
     // suppose we run this program on build dir
     // const std::string shader_path{"../examples/shader/multi_layer_matmul.comp.spv"};
-    const std::string shader_path{"../examples/shader/multi_layer_matmul2.comp.spv"};
+    // const std::string shader_path{"../examples/shader/multi_layer_matmul2.comp.spv"};
+    const std::string shader_path{"../examples/shader/multi_layer_matmul3.comp.spv"};
 
     Mat A{2, 2};
     Mat B{2, 2};

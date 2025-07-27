@@ -1,0 +1,73 @@
+#version 450
+
+struct Matrix {
+	int dims;
+	int col;
+	int row;
+   	float data[4];
+};
+
+layout(set = 0, binding = 0) buffer input0 {
+	Matrix input_a;
+};
+
+layout(set = 1, binding = 0) buffer input1 {
+	Matrix input_b;
+};
+
+layout(set = 2, binding = 0) buffer input2 {
+	Matrix input_c;
+};
+
+layout(set = 3, binding = 0) buffer output0 {
+	Matrix output_m;
+};
+
+shared Matrix shared_m;
+
+layout (local_size_x = 4, local_size_y = 4, local_size_z = 1) in;
+
+
+void layer1()
+{
+	uint index_x = gl_GlobalInvocationID.x;
+	uint index_y = gl_GlobalInvocationID.y;
+
+
+	if (index_x >= output_m.row || index_y >= output_m.col) {
+		return;
+	}
+
+	shared_m.data[index_x * output_m.col + index_y] = 0.0;
+	for (uint i = 0; i < input_a.col; ++i) {
+		shared_m.data[index_x * input_b.col + index_y] += input_a.data[index_x * input_a.col + i] *
+			input_b.data[i * input_b.col + index_y];
+	}
+}
+
+void layer2()
+{
+	uint index_x = gl_GlobalInvocationID.x;
+	uint index_y = gl_GlobalInvocationID.y;
+
+	if (index_x >= output_m.row || index_y >= output_m.col) {
+		return;
+	}
+
+	output_m.data[index_x * output_m.col + index_y] = 0.0;
+	for (uint i = 0; i < input_c.row; ++i) {
+		output_m.data[index_x * output_m.col + index_y] += shared_m.data[index_x * input_b.col + i] *
+			input_c.data[i * input_c.col + index_y];
+	}
+}
+
+void main() 
+{
+	output_m.dims = input_a.dims;
+	output_m.col = input_b.col;
+	output_m.row = input_a.row;
+
+	layer1();
+	barrier();
+	layer2();
+}
