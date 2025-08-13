@@ -29,3 +29,10 @@ target_link_libraries(multi_layer_matmul
     vulkan
 )
 
+add_executable(model
+    04-model.cpp
+)
+
+target_link_libraries(model
+    vulkan
+)
