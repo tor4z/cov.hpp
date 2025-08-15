@@ -62,17 +62,6 @@ struct MemMapping
 
 struct CompPass
 {
-    Instance* instance;
-    std::vector<VkDescriptorSet> desc_set;
-    std::vector<VkDescriptorSetLayout> desc_set_layout;
-    std::vector<VkBufferMemoryBarrier> mem_buff_barriers;
-    std::array<int, 3> workgroup_dims;
-    VkPipeline comp_pipeline;
-    VkDescriptorPool desc_pool;
-    VkShaderModule shader_module{};
-    VkPipelineLayout pipeline_layout{};
-    VkPipelineCache pipeline_cache{};
-
     CompPass* set_mem_mapping(const std::vector<int>& used_mappings);
     CompPass* set_workgroup_dims(int x, int y, int z);
     CompPass* set_mem_barrier(const std::vector<int>& mem_barriers);
@@ -84,6 +73,17 @@ private:
     explicit CompPass(Instance* instance);
     void destroy(VkDevice device);
     bool build_comp_pipeline();
+
+    Instance* instance;
+    std::vector<VkDescriptorSet> desc_set;
+    std::vector<VkDescriptorSetLayout> desc_set_layout;
+    std::vector<VkBufferMemoryBarrier> mem_buff_barriers;
+    std::array<int, 3> workgroup_dims;
+    VkPipeline comp_pipeline;
+    VkDescriptorPool desc_pool;
+    VkShaderModule shader_module{};
+    VkPipelineLayout pipeline_layout{};
+    VkPipelineCache pipeline_cache{};
 }; // struct CompPass
 
 class Instance
