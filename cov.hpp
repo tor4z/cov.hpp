@@ -1,6 +1,7 @@
 #ifndef COV_H_
 #define COV_H_
 
+#include <array>
 #include <mutex>
 #include <optional>
 #include <vector>
@@ -27,6 +28,8 @@ private:                                                                        
     classname& operator=(const classname&&) = delete;
 
 namespace cov {
+
+class Instance;
 
 class PhysicalDevice
 {
@@ -59,11 +62,28 @@ struct MemMapping
 
 struct CompPass
 {
+    Instance* instance;
     std::vector<VkDescriptorSet> desc_set;
+    std::vector<VkDescriptorSetLayout> desc_set_layout;
+    std::vector<VkBufferMemoryBarrier> mem_buff_barriers;
+    std::array<int, 3> workgroup_dims;
     VkPipeline comp_pipeline;
     VkDescriptorPool desc_pool;
+    VkShaderModule shader_module{};
+    VkPipelineLayout pipeline_layout{};
+    VkPipelineCache pipeline_cache{};
 
+    CompPass* set_mem_mapping(const std::vector<int>& used_mappings);
+    CompPass* set_workgroup_dims(int x, int y, int z);
+    CompPass* set_mem_barrier(const std::vector<int>& mem_barriers);
+    CompPass* load_shader_from_file(const std::string_view& shader_path);
+    CompPass* load_bin_shader(const void* shader, size_t size);
+    bool build();
+private:
+    friend class Instance;
+    explicit CompPass(Instance* instance);
     void destroy(VkDevice device);
+    bool build_comp_pipeline();
 }; // struct CompPass
 
 class Instance
@@ -84,10 +104,12 @@ public:
     int add_mem_mapping(size_t size);
     bool to_device(int id, const void* ptr, size_t size);
     bool from_device(int id, void* ptr, size_t size);
-    bool add_pass(const std::string_view& shader_path, const std::vector<int>& inputs, const std::array<int, 3>& dims);
+    CompPass* add_pass();
     bool execute();
     void destroy();
 private:
+    friend struct CompPass;
+
     VkInstance vk_instance_;
     VkCommandPool cmd_pool_;
     VkQueue queue_;
@@ -104,8 +126,8 @@ private:
 
     friend class App;
     Instance(VkInstance vk_instance);
+    void creat_cmd_buff();
     static bool init_command_pool(VkDevice device, uint32_t queue_index, VkCommandPool& cmd_pool);
-    bool load_shader(const std::string_view& shader_path, VkShaderModule& shader_module);
 }; // class Instance
 
 class App
@@ -144,7 +166,6 @@ private:
 #include <cstddef>
 #include <fstream>
 #include <vector>
-#include <array>
 #include <mutex>
 #include <cstring>
 #include <iostream>
@@ -241,6 +262,7 @@ Instance::Instance(VkInstance vk_instance)
     , queue_(VK_NULL_HANDLE)
     , phy_device_(VK_NULL_HANDLE)
     , device_(VK_NULL_HANDLE)
+    , cmd_buff_(VK_NULL_HANDLE)
     , queue_index_(-1)
     , input_size_(0)
     , output_size_(0)
@@ -363,6 +385,19 @@ int Instance::add_mem_mapping(size_t size)
     return id;
 }
 
+void Instance::creat_cmd_buff()
+{
+    if (cmd_buff_ != VK_NULL_HANDLE) {
+        return;
+    }
+    VkCommandBufferAllocateInfo cmd_buff_alloc_info{};
+    cmd_buff_alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    cmd_buff_alloc_info.commandBufferCount = 1;
+    cmd_buff_alloc_info.commandPool = cmd_pool_;
+    cmd_buff_alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    COV_CHECK_ASSERT(vkAllocateCommandBuffers(device_, &cmd_buff_alloc_info, &cmd_buff_))
+}
+
 bool Instance::to_device(int id, const void* ptr, size_t size)
 {
     assert(ptr != nullptr && "Nullptr found");
@@ -466,7 +501,21 @@ bool Instance::from_device(int id, void* ptr, size_t size)
     return true;
 }
 
-bool Instance::load_shader(const std::string_view& shader_path, VkShaderModule& shader_module)
+CompPass* Instance::add_pass()
+{
+    comp_passes_.push_back(CompPass{this});
+    auto pass{&comp_passes_.back()};
+
+    return pass;
+}
+
+CompPass::CompPass(Instance* instance)
+    : instance(instance)
+    , workgroup_dims({1, 1, 1})
+{
+}
+
+CompPass* CompPass::load_shader_from_file(const std::string_view& shader_path)
 {
     std::ifstream ifs(shader_path.data(), std::ios::in | std::ios::binary);
     if (ifs.is_open()) {
@@ -475,44 +524,71 @@ bool Instance::load_shader(const std::string_view& shader_path, VkShaderModule& 
         char* data{new char[size]};
         ifs.seekg(0, std::ios::beg);
         ifs.read(data, size);
-
-        VkShaderModuleCreateInfo create_info{};
-        create_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-        create_info.codeSize = size;
-        create_info.pCode = reinterpret_cast<uint32_t*>(data);
-        COV_CHECK_ASSERT(vkCreateShaderModule(device_, &create_info, nullptr, &shader_module))
-
+        load_bin_shader(data, size);
         delete [] data;
     } else {
-        return false;
+        assert(false && "Load shader fro file failed");
     }
 
+    return this;
+}
+
+CompPass* CompPass::load_bin_shader(const void* shader, size_t size)
+{
+    VkShaderModuleCreateInfo create_info{};
+    create_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    create_info.codeSize = size;
+    create_info.pCode = reinterpret_cast<const uint32_t*>(shader);
+    COV_CHECK_ASSERT(vkCreateShaderModule(instance->device_, &create_info, nullptr, &shader_module))
+    return this;
+}
+
+bool CompPass::build_comp_pipeline()
+{
+    VkPipelineLayoutCreateInfo pipeline_create_info{};
+    pipeline_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pipeline_create_info.setLayoutCount = desc_set_layout.size();
+    pipeline_create_info.pSetLayouts = desc_set_layout.data();
+    COV_CHECK_ASSERT(vkCreatePipelineLayout(instance->device_, &pipeline_create_info, nullptr, &pipeline_layout))
+
+    VkPipelineCacheCreateInfo pipeline_cache_create_info{};
+    pipeline_cache_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
+    COV_CHECK_ASSERT(vkCreatePipelineCache(instance->device_, &pipeline_cache_create_info, nullptr, &pipeline_cache))
+
+    VkPipelineShaderStageCreateInfo shader_stage_create_info{};
+    shader_stage_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    shader_stage_create_info.module = shader_module;
+    if (instance->spec_info_.mapEntryCount > 0) {
+        shader_stage_create_info.pSpecializationInfo = &instance->spec_info_;
+    } else {
+        shader_stage_create_info.pSpecializationInfo = VK_NULL_HANDLE;
+    }
+    shader_stage_create_info.pName = "main";
+    shader_stage_create_info.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+
+    VkComputePipelineCreateInfo comp_pipeline_create_info{};
+    comp_pipeline_create_info.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+    comp_pipeline_create_info.stage = shader_stage_create_info;
+    comp_pipeline_create_info.layout = pipeline_layout;
+    comp_pipeline_create_info.flags = 0;
+    COV_CHECK_ASSERT(vkCreateComputePipelines(instance->device_, pipeline_cache, 1, &comp_pipeline_create_info, nullptr, &comp_pipeline))
     return true;
 }
 
-bool Instance::add_pass(const std::string_view& shader_path, const std::vector<int>& inputs, const std::array<int, 3>& dims)
+CompPass* CompPass::set_mem_mapping(const std::vector<int>& used_mappings)
 {
-    CompPass pass{};
-
-    pass.desc_set.resize(mem_mappings_.size());
-    std::vector<VkDescriptorSetLayout> desc_set_layout(mem_mappings_.size());
-    VkPipelineLayout pipeline_layout{};
-    VkPipelineCache pipeline_cache{};
-    VkShaderModule shader_module{};
-
-    if (!load_shader(shader_path, shader_module)) {
-        return false;
-    }
+    desc_set.resize(used_mappings.size());
+    desc_set_layout.resize(used_mappings.size());
 
     std::vector<VkDescriptorPoolSize> pool_sizes{
-        VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .descriptorCount = static_cast<uint32_t>(mem_mappings_.size())}
+        VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .descriptorCount = static_cast<uint32_t>(used_mappings.size())}
     };
     VkDescriptorPoolCreateInfo pool_create_info{};
     pool_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     pool_create_info.poolSizeCount = static_cast<uint32_t>(pool_sizes.size());
     pool_create_info.pPoolSizes = pool_sizes.data();
-    pool_create_info.maxSets = mem_mappings_.size();
-    COV_CHECK_ASSERT(vkCreateDescriptorPool(device_, &pool_create_info, nullptr, &pass.desc_pool))
+    pool_create_info.maxSets = used_mappings.size();
+    COV_CHECK_ASSERT(vkCreateDescriptorPool(instance->device_, &pool_create_info, nullptr, &desc_pool))
 
     std::vector<VkDescriptorSetLayoutBinding> set_layout_bindings{
         VkDescriptorSetLayoutBinding{
@@ -527,83 +603,55 @@ bool Instance::add_pass(const std::string_view& shader_path, const std::vector<i
     layout_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     layout_create_info.bindingCount = static_cast<uint32_t>(set_layout_bindings.size());
     layout_create_info.pBindings = set_layout_bindings.data();
-    for (size_t i = 0; i < mem_mappings_.size(); ++i) {
-        COV_CHECK_ASSERT(vkCreateDescriptorSetLayout(device_, &layout_create_info, nullptr, &desc_set_layout[i]))
+    for (size_t i = 0; i < used_mappings.size(); ++i) {
+        COV_CHECK_ASSERT(vkCreateDescriptorSetLayout(instance->device_, &layout_create_info, nullptr, &desc_set_layout.at(i)))
     }
-
-    VkPipelineLayoutCreateInfo pipeline_create_info{};
-    pipeline_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipeline_create_info.setLayoutCount = desc_set_layout.size();
-    pipeline_create_info.pSetLayouts = desc_set_layout.data();
-    COV_CHECK_ASSERT(vkCreatePipelineLayout(device_, &pipeline_create_info, nullptr, &pipeline_layout))
 
     VkDescriptorSetAllocateInfo desc_alloc_info{};
     desc_alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    desc_alloc_info.descriptorSetCount = mem_mappings_.size();
-    desc_alloc_info.descriptorPool = pass.desc_pool;
+    desc_alloc_info.descriptorSetCount = used_mappings.size();
+    desc_alloc_info.descriptorPool = desc_pool;
     desc_alloc_info.pSetLayouts = desc_set_layout.data();
-    COV_CHECK_ASSERT(vkAllocateDescriptorSets(device_, &desc_alloc_info, pass.desc_set.data()))
+    COV_CHECK_ASSERT(vkAllocateDescriptorSets(instance->device_, &desc_alloc_info, desc_set.data()))
 
-    std::vector<VkDescriptorBufferInfo> desc_buff_info(mem_mappings_.size());
-
-    for (size_t i = 0; i < mem_mappings_.size(); ++i) {
-        const auto& mapping{mem_mappings_.at(i)};
+    std::vector<VkDescriptorBufferInfo> desc_buff_info(used_mappings.size());
+    for (size_t i = 0; i < used_mappings.size(); ++i) {
+        const auto& mapping{instance->mem_mappings_.at(used_mappings.at(i))};
         desc_buff_info[i].range = VK_WHOLE_SIZE;
         desc_buff_info[i].offset = 0;
         desc_buff_info[i].buffer = mapping.device_buff;
     }
 
     std::vector<VkWriteDescriptorSet> write_desc_sets;
-    write_desc_sets.reserve(mem_mappings_.size());
-    for (size_t i = 0; i < mem_mappings_.size(); ++i) {
+    write_desc_sets.reserve(used_mappings.size());
+    for (size_t i = 0; i < used_mappings.size(); ++i) {
         write_desc_sets.emplace_back(VkWriteDescriptorSet{
             .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet = pass.desc_set[i],
+            .dstSet = desc_set.at(i),
             .dstBinding = 0,
             .descriptorCount = 1,
             .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-            .pBufferInfo = &desc_buff_info[i]
+            .pBufferInfo = &desc_buff_info.at(i)
         });
     }
 
-    vkUpdateDescriptorSets(device_, write_desc_sets.size(), write_desc_sets.data(), 0, nullptr);
+    vkUpdateDescriptorSets(instance->device_, write_desc_sets.size(), write_desc_sets.data(), 0, nullptr);
+    return this;
+}
 
-    VkPipelineCacheCreateInfo pipeline_cache_create_info{};
-    pipeline_cache_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
-    COV_CHECK_ASSERT(vkCreatePipelineCache(device_, &pipeline_cache_create_info, nullptr, &pipeline_cache))
+CompPass* CompPass::set_workgroup_dims(int x, int y, int z)
+{
+    workgroup_dims.at(0) = x;
+    workgroup_dims.at(1) = y;
+    workgroup_dims.at(2) = z;
+    return this;
+}
 
-    VkPipelineShaderStageCreateInfo shader_stage_create_info{};
-    shader_stage_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    shader_stage_create_info.module = shader_module;
-    if (spec_info_.mapEntryCount > 0) {
-        shader_stage_create_info.pSpecializationInfo = &spec_info_;
-    } else {
-        shader_stage_create_info.pSpecializationInfo = VK_NULL_HANDLE;
-    }
-    shader_stage_create_info.pName = "main";
-    shader_stage_create_info.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-
-    VkComputePipelineCreateInfo comp_pipeline_create_info{};
-    comp_pipeline_create_info.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-    comp_pipeline_create_info.stage = shader_stage_create_info;
-    comp_pipeline_create_info.layout = pipeline_layout;
-    comp_pipeline_create_info.flags = 0;
-    COV_CHECK_ASSERT(vkCreateComputePipelines(device_, pipeline_cache, 1, &comp_pipeline_create_info, nullptr, &pass.comp_pipeline))
-
-    VkCommandBufferAllocateInfo cmd_buff_alloc_info{};
-    cmd_buff_alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    cmd_buff_alloc_info.commandBufferCount = 1;
-    cmd_buff_alloc_info.commandPool = cmd_pool_;
-    cmd_buff_alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    COV_CHECK_ASSERT(vkAllocateCommandBuffers(device_, &cmd_buff_alloc_info, &cmd_buff_))
-
-    VkCommandBufferBeginInfo cmd_begin_info{};
-    cmd_begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    COV_CHECK_ASSERT(vkBeginCommandBuffer(cmd_buff_, &cmd_begin_info))
-
-    std::vector<VkBufferMemoryBarrier> mem_buff_barriers(inputs.size());
-    for (size_t i = 0; i < inputs.size(); ++i) {
-        auto& mapping{mem_mappings_.at(inputs.at(i))};
+CompPass* CompPass::set_mem_barrier(const std::vector<int>& mem_barriers)
+{
+    mem_buff_barriers.resize(mem_barriers.size());
+    for (size_t i = 0; i < mem_barriers.size(); ++i) {
+        auto& mapping{instance->mem_mappings_.at(mem_barriers.at(i))};
         auto& mem_buff_barrier{mem_buff_barriers.at(i)};
         mem_buff_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
         mem_buff_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -614,36 +662,36 @@ bool Instance::add_pass(const std::string_view& shader_path, const std::vector<i
         mem_buff_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
     }
 
-    vkCmdPipelineBarrier(cmd_buff_, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0,
-        0, nullptr,
-        mem_buff_barriers.size(), mem_buff_barriers.data(),
-        0, nullptr);
+    return this;
+}
 
-    vkCmdBindPipeline(cmd_buff_, VK_PIPELINE_BIND_POINT_COMPUTE, pass.comp_pipeline);
-    vkCmdBindDescriptorSets(cmd_buff_, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_layout, 0, mem_mappings_.size(), pass.desc_set.data(), 0, nullptr);
-    vkCmdDispatch(cmd_buff_, dims[0], dims[1], dims[2]);
+bool CompPass::build()
+{
+    build_comp_pipeline();
+    instance->creat_cmd_buff();
 
-    // mem_buff_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    // mem_buff_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    // mem_buff_barrier.buffer = in_device_buff_;
-    // mem_buff_barrier.size = VK_WHOLE_SIZE;
-    // mem_buff_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    // mem_buff_barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    // vkCmdPipelineBarrier(cmd_buff, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
-    //     0, nullptr,
-    //     1, &mem_buff_barrier,
-    //     0, nullptr);
+    VkCommandBufferBeginInfo cmd_begin_info{};
+    cmd_begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 
-    COV_CHECK_ASSERT(vkEndCommandBuffer(cmd_buff_))
-
-    vkDestroyShaderModule(device_, shader_module, nullptr);
-    vkDestroyPipelineCache(device_, pipeline_cache, nullptr);
-    vkDestroyPipelineLayout(device_, pipeline_layout, nullptr);
-    for (auto dsl : desc_set_layout) {
-        vkDestroyDescriptorSetLayout(device_, dsl, nullptr);
+    COV_CHECK_ASSERT(vkBeginCommandBuffer(instance->cmd_buff_, &cmd_begin_info))
+    if (!mem_buff_barriers.empty()) {
+        vkCmdPipelineBarrier(instance->cmd_buff_, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0,
+            0, nullptr,
+            mem_buff_barriers.size(), mem_buff_barriers.data(),
+            0, nullptr);
     }
+    vkCmdBindPipeline(instance->cmd_buff_, VK_PIPELINE_BIND_POINT_COMPUTE, comp_pipeline);
+    vkCmdBindDescriptorSets(instance->cmd_buff_, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_layout,
+        0, desc_set.size(), desc_set.data(), 0, nullptr);
+    vkCmdDispatch(instance->cmd_buff_, workgroup_dims.at(0), workgroup_dims.at(1), workgroup_dims.at(2));
+    COV_CHECK_ASSERT(vkEndCommandBuffer(instance->cmd_buff_))
 
-    comp_passes_.push_back(pass);
+    vkDestroyShaderModule(instance->device_, shader_module, nullptr);
+    vkDestroyPipelineCache(instance->device_, pipeline_cache, nullptr);
+    vkDestroyPipelineLayout(instance->device_, pipeline_layout, nullptr);
+    for (auto dsl : desc_set_layout) {
+        vkDestroyDescriptorSetLayout(instance->device_, dsl, nullptr);
+    }
     return true;
 }
 

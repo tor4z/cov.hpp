@@ -26,7 +26,12 @@ int main()
         auto A_id{instance.add_mem_mapping(A1.bytes())};
         auto B_id{instance.add_mem_mapping(B.bytes())};
         auto C_id{instance.add_mem_mapping(C.bytes())};
-        instance.add_pass(shader_path, {A_id, B_id}, {C.row, C.col, 1});
+        instance.add_pass()
+            ->load_shader_from_file(shader_path)
+            ->set_mem_mapping({A_id, B_id, C_id})
+            ->set_workgroup_dims(C.row, C.col, 1)
+            ->set_mem_barrier({A_id, B_id})
+            ->build();
 
         {
             // compute with data
