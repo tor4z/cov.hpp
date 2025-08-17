@@ -203,7 +203,7 @@ private:
 // =======================================
 //            Implementation
 // =======================================
-#define COV_IMPLEMENTATION // please delete me
+// #define COV_IMPLEMENTATION // please delete me
 
 
 #ifdef COV_IMPLEMENTATION
