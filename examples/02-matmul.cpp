@@ -18,31 +18,39 @@ int main()
     A2 << 1.2f, 2.1f, 3.1f, 4.1f;
     B << 5.5f, 6.6f, 7.7f, 8.8f;
 
-    cov::App::init("Matmul");
+    cov::Vulkan::init("Matmul");
 
     {
         // define compute
-        auto instance{cov::App::new_instance()};
-        auto A_id{instance.add_mem_mapping(A1.bytes())};
-        auto B_id{instance.add_mem_mapping(B.bytes())};
-        auto C_id{instance.add_mem_mapping(C.bytes())};
-        instance.add_pass()
+        auto instance{cov::Vulkan::new_instance()};
+        auto A_mapping{instance.add_mem_mapping(A1.bytes())};
+        auto B_mapping{instance.add_mem_mapping(B.bytes())};
+        auto C_mapping{instance.add_mem_mapping(C.bytes())};
+
+        // compute with data
+        instance.add_transfer_pass()
+            ->to_device(A_mapping)
+            ->to_device(B_mapping)
+            ->build();
+
+        instance.add_compute_pass()
             ->load_shader_from_file(shader_path)
-            ->set_mem_mapping({A_id, B_id, C_id})
+            ->set_mem_mapping({A_mapping, B_mapping, C_mapping})
             ->set_workgroup_dims(C.row, C.col, 1)
-            ->set_mem_barrier({A_id, B_id})
+            ->set_mem_barrier({A_mapping, B_mapping})
+            ->build();
+
+        instance.add_transfer_pass()
+            ->from_device(C_mapping)
             ->build();
 
         {
-            // compute with data
-            instance.to_device(A_id, A1.ptr(), A1.bytes());
-            instance.to_device(B_id, B.ptr(), B.bytes());
-
+            A_mapping->memcpy_from(A1.ptr(), A1.bytes());
+            B_mapping->memcpy_from(B.ptr(), B.bytes());
             if (!instance.execute()) {
                 std::cerr << "Execute shader program failed\n";
             }
-            instance.from_device(C_id, C.ptr(), C.bytes());
-
+            C_mapping->memcpy_to(C.ptr(), C.bytes());
             std::cout << "A: \n" << A1 << "\n";
             std::cout << "B: \n" << B << "\n";
             std::cout << "C: \n" << C << "\n";
@@ -50,14 +58,12 @@ int main()
 
         {
             // compute with another data
-            instance.to_device(A_id, A2.ptr(), A2.bytes());
-            instance.to_device(B_id, B.ptr(), B.bytes());
-
+            A_mapping->memcpy_from(A2.ptr(), A2.bytes());
+            B_mapping->memcpy_from(B.ptr(), B.bytes());
             if (!instance.execute()) {
                 std::cerr << "Execute shader program failed\n";
             }
-            instance.from_device(C_id, C.ptr(), C.bytes());
-
+            C_mapping->memcpy_to(C.ptr(), C.bytes());
             std::cout << "A: \n" << A2 << "\n";
             std::cout << "B: \n" << B << "\n";
             std::cout << "C: \n" << C << "\n";
