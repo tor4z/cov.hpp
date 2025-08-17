@@ -53,6 +53,14 @@ private:
 
 struct MemMapping
 {
+    enum AccessStage {
+        AS_UNKNOWN = 0,
+        AS_TRANSFER_R,
+        AS_TRANSFER_W,
+        AS_COMPUTE_R,
+        AS_COMPUTE_W,
+    };
+
     MemMapping(const MemMapping& other);
     MemMapping(MemMapping&& other);
     MemMapping& operator=(const MemMapping& other);
@@ -69,7 +77,9 @@ private:
         , host_buff(VK_NULL_HANDLE)
         , host_memory(VK_NULL_HANDLE)
         , device_buff(VK_NULL_HANDLE)
-        , device_memory(VK_NULL_HANDLE) {}
+        , device_memory(VK_NULL_HANDLE)
+        , size(0)
+        , stage(AS_UNKNOWN) {}
     void destroy();
 
     Instance* instance;
@@ -78,6 +88,7 @@ private:
     VkBuffer device_buff;
     VkDeviceMemory device_memory;
     size_t size;
+    AccessStage stage;
 }; // struct MemMapping
 
 struct TransferPass
@@ -96,9 +107,9 @@ private:
 
 struct ComputePass
 {
-    ComputePass* use_mem_mapping(const std::vector<MemMapping*>& used_mappings);
+    ComputePass* set_inputs(const std::vector<MemMapping*>& input_mappings);
+    ComputePass* set_outputs(const std::vector<MemMapping*>& output_mappings);
     ComputePass* set_workgroup_dims(int x, int y, int z);
-    ComputePass* set_mem_barrier(const std::vector<MemMapping*>& mem_barriers);
     ComputePass* load_shader_from_file(const std::string_view& shader_path);
     ComputePass* load_bin_shader(const void* shader, size_t size);
     bool build();
@@ -108,11 +119,13 @@ private:
     explicit ComputePass(Instance* instance);
     void destroy(VkDevice device);
     bool build_comp_pipeline();
+    bool build_descriptor_set();
 
     Instance* instance;
+    std::vector<MemMapping*> used_mappings;
     std::vector<VkDescriptorSet> desc_set;
     std::vector<VkDescriptorSetLayout> desc_set_layout;
-    std::vector<VkBufferMemoryBarrier> mem_buff_barriers;
+    std::vector<VkBufferMemoryBarrier> mem_buf_barriers;
     std::array<int, 3> workgroup_dims;
     VkPipeline comp_pipeline;
     VkDescriptorPool desc_pool;
@@ -598,6 +611,7 @@ TransferPass* TransferPass::to_device(MemMapping* mapping)
     assert(mapping != nullptr && "Invalid memory mapping");
 
     instance->try_begin_cmd_buf();
+    mapping->stage = MemMapping::AS_TRANSFER_W;
     VkBufferCopy copy_region{.size = mapping->size};
     vkCmdCopyBuffer(instance->cmd_buf_, mapping->host_buff, mapping->device_buff, 1, &copy_region);
     return this;
@@ -608,6 +622,7 @@ TransferPass* TransferPass::from_device(MemMapping* mapping)
     assert(mapping != nullptr && "Invalid memory mapping");
 
     instance->try_begin_cmd_buf();
+    mapping->stage = MemMapping::AS_TRANSFER_R;
     VkBufferCopy copy_region{.size = mapping->size};
     vkCmdCopyBuffer(instance->cmd_buf_, mapping->device_buff, mapping->host_buff, 1, &copy_region);
     return this;
@@ -684,7 +699,44 @@ bool ComputePass::build_comp_pipeline()
     return true;
 }
 
-ComputePass* ComputePass::use_mem_mapping(const std::vector<MemMapping*>& used_mappings)
+ComputePass* ComputePass::set_outputs(const std::vector<MemMapping*>& output_mappings)
+{
+    used_mappings.insert(used_mappings.end(), output_mappings.begin(), output_mappings.end());
+    for (auto mapping : output_mappings) {
+        mapping->stage = MemMapping::AS_COMPUTE_W;
+    }
+    return this;
+}
+
+ComputePass* ComputePass::set_inputs(const std::vector<MemMapping*>& input_mappings)
+{
+    mem_buf_barriers.resize(input_mappings.size());
+    for (size_t i = 0; i < input_mappings.size(); ++i) {
+        auto& mapping{input_mappings.at(i)};
+        if (mapping->stage != MemMapping::AS_TRANSFER_W && mapping->stage != MemMapping::AS_COMPUTE_W) {
+            continue;
+        }
+
+        auto& mem_barrier{mem_buf_barriers.at(i)};
+        mem_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+        mem_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        mem_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        mem_barrier.buffer = mapping->device_buff;
+        mem_barrier.size = VK_WHOLE_SIZE;
+        if (mapping->stage == MemMapping::AS_TRANSFER_W) {
+            mem_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        } else if (mapping->stage == MemMapping::AS_COMPUTE_W) {
+            mem_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        }
+        mem_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    }
+
+    used_mappings.insert(used_mappings.begin(), input_mappings.begin(), input_mappings.end());
+    return this;
+}
+
+
+bool ComputePass::build_descriptor_set()
 {
     desc_set.resize(used_mappings.size());
     desc_set_layout.resize(used_mappings.size());
@@ -756,34 +808,37 @@ ComputePass* ComputePass::set_workgroup_dims(int x, int y, int z)
     return this;
 }
 
-ComputePass* ComputePass::set_mem_barrier(const std::vector<MemMapping*>& mem_barriers)
-{
-    mem_buff_barriers.resize(mem_barriers.size());
-    for (size_t i = 0; i < mem_barriers.size(); ++i) {
-        auto& mapping{mem_barriers.at(i)};
-        auto& mem_buff_barrier{mem_buff_barriers.at(i)};
-        mem_buff_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-        mem_buff_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        mem_buff_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        mem_buff_barrier.buffer = mapping->device_buff;
-        mem_buff_barrier.size = VK_WHOLE_SIZE;
-        mem_buff_barrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
-        mem_buff_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-    }
-
-    return this;
-}
-
 bool ComputePass::build()
 {
+    build_descriptor_set();
     build_comp_pipeline();
     instance->try_begin_cmd_buf();
 
-    if (!mem_buff_barriers.empty()) {
-        vkCmdPipelineBarrier(instance->cmd_buf_, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0,
-            0, nullptr,
-            mem_buff_barriers.size(), mem_buff_barriers.data(),
-            0, nullptr);
+    if (!mem_buf_barriers.empty()) {
+        std::vector<VkBufferMemoryBarrier> transfer_stage_barriers;
+        std::vector<VkBufferMemoryBarrier> compute_stage_barriers;
+
+        for (auto& it : mem_buf_barriers) {
+            if (it.srcAccessMask == VK_ACCESS_TRANSFER_WRITE_BIT) {
+                transfer_stage_barriers.push_back(it);
+            } else {
+                compute_stage_barriers.push_back(it);
+            }
+        }
+
+        if (!transfer_stage_barriers.empty()) {
+            vkCmdPipelineBarrier(instance->cmd_buf_, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0,
+                0, nullptr,
+                transfer_stage_barriers.size(), transfer_stage_barriers.data(),
+                0, nullptr);
+        }
+        if (!compute_stage_barriers.empty()) {
+            vkCmdPipelineBarrier(instance->cmd_buf_, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0,
+                0, nullptr,
+                compute_stage_barriers.size(), compute_stage_barriers.data(),
+                0, nullptr);
+        }
+
     }
     vkCmdBindPipeline(instance->cmd_buf_, VK_PIPELINE_BIND_POINT_COMPUTE, comp_pipeline);
     vkCmdBindDescriptorSets(instance->cmd_buf_, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_layout,

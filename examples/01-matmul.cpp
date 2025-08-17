@@ -35,9 +35,9 @@ int main()
 
             instance.add_compute_pass()
                 ->load_shader_from_file(shader_path)
-                ->use_mem_mapping({A_mapping, B_mapping, C_mapping})
+                ->set_inputs({A_mapping, B_mapping})
+                ->set_outputs({C_mapping})
                 ->set_workgroup_dims(C.row, C.col, 1)
-                ->set_mem_barrier({A_mapping, B_mapping})
                 ->build();
 
             instance.add_transfer_pass()
