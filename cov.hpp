@@ -57,8 +57,8 @@ struct MemMapping
     MemMapping(MemMapping&& other);
     MemMapping& operator=(const MemMapping& other);
     MemMapping& operator=(MemMapping&& other);
-    bool memcpy_from(const void* ptr, size_t size);
-    bool memcpy_to(void* ptr, size_t size);
+    bool copy_from(const void* ptr, size_t size);
+    bool copy_to(void* ptr, size_t size);
 private:
     friend struct TransferPass;
     friend struct ComputePass;
@@ -566,7 +566,7 @@ MemMapping& MemMapping::operator=(MemMapping&& other)
     return *this;
 }
 
-bool MemMapping::memcpy_from(const void* ptr, size_t size)
+bool MemMapping::copy_from(const void* ptr, size_t size)
 {
     assert(ptr != nullptr && "Invalid pointer");
     assert(size > 0 && "Invalid buffer size");
@@ -580,7 +580,7 @@ bool MemMapping::memcpy_from(const void* ptr, size_t size)
     return true;
 }
 
-bool MemMapping::memcpy_to(void* ptr, size_t size)
+bool MemMapping::copy_to(void* ptr, size_t size)
 {
     assert(ptr != nullptr && "Invalid pointer");
     assert(size > 0 && "Invalid buffer size");

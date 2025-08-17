@@ -49,12 +49,12 @@ int main()
 
         {
             // compute with data 
-            A_mapping->memcpy_from(A1.ptr(), A1.bytes());
-            B_mapping->memcpy_from(B.ptr(), B.bytes());
+            A_mapping->copy_from(A1.ptr(), A1.bytes());
+            B_mapping->copy_from(B.ptr(), B.bytes());
             if (!instance.execute()) {
                 std::cerr << "Execute shader program failed\n";
             }
-            C_mapping->memcpy_to(C.ptr(), C.bytes());
+            C_mapping->copy_to(C.ptr(), C.bytes());
             std::cout << "A: \n" << A1 << "\n";
             std::cout << "B: \n" << B << "\n";
             std::cout << "C: \n" << C << "\n";
@@ -62,12 +62,12 @@ int main()
 
         {
             // compute with another data
-            A_mapping->memcpy_from(A2.ptr(), A2.bytes());
-            B_mapping->memcpy_from(B.ptr(), B.bytes());
+            A_mapping->copy_from(A2.ptr(), A2.bytes());
+            B_mapping->copy_from(B.ptr(), B.bytes());
             if (!instance.execute()) {
                 std::cerr << "Execute shader program failed\n";
             }
-            C_mapping->memcpy_to(C.ptr(), C.bytes());
+            C_mapping->copy_to(C.ptr(), C.bytes());
             std::cout << "A: \n" << A2 << "\n";
             std::cout << "B: \n" << B << "\n";
             std::cout << "C: \n" << C << "\n";
