@@ -203,7 +203,7 @@ private:
 // =======================================
 //            Implementation
 // =======================================
-// #define COV_IMPLEMENTATION // please delete me
+#define COV_IMPLEMENTATION // please delete me
 
 
 #ifdef COV_IMPLEMENTATION
@@ -611,9 +611,9 @@ TransferPass* TransferPass::to_device(MemMapping* mapping)
     assert(mapping != nullptr && "Invalid memory mapping");
 
     instance->try_begin_cmd_buf();
-    mapping->stage = MemMapping::AS_TRANSFER_W;
     VkBufferCopy copy_region{.size = mapping->size};
     vkCmdCopyBuffer(instance->cmd_buf_, mapping->host_buff, mapping->device_buff, 1, &copy_region);
+    mapping->stage = MemMapping::AS_TRANSFER_W;
     return this;
 }
 
@@ -622,9 +622,31 @@ TransferPass* TransferPass::from_device(MemMapping* mapping)
     assert(mapping != nullptr && "Invalid memory mapping");
 
     instance->try_begin_cmd_buf();
-    mapping->stage = MemMapping::AS_TRANSFER_R;
+
     VkBufferCopy copy_region{.size = mapping->size};
+    VkPipelineStageFlags src_stage_bit{};
+    VkBufferMemoryBarrier mem_barrier{
+        .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+        .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .buffer = mapping->device_buff,
+        .size = VK_WHOLE_SIZE,
+    };
+    if (mapping->stage == MemMapping::AS_TRANSFER_W) {
+        src_stage_bit = VK_PIPELINE_STAGE_TRANSFER_BIT;
+        mem_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    } else if (mapping->stage == MemMapping::AS_COMPUTE_W) {
+        src_stage_bit = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+        mem_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    }
+
+    vkCmdPipelineBarrier(instance->cmd_buf_, src_stage_bit, VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
+        0, nullptr,
+        1, &mem_barrier,
+        0, nullptr);
     vkCmdCopyBuffer(instance->cmd_buf_, mapping->device_buff, mapping->host_buff, 1, &copy_region);
+    mapping->stage = MemMapping::AS_TRANSFER_R;
     return this;
 }
 
@@ -838,8 +860,8 @@ bool ComputePass::build()
                 compute_stage_barriers.size(), compute_stage_barriers.data(),
                 0, nullptr);
         }
-
     }
+
     vkCmdBindPipeline(instance->cmd_buf_, VK_PIPELINE_BIND_POINT_COMPUTE, comp_pipeline);
     vkCmdBindDescriptorSets(instance->cmd_buf_, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_layout,
         0, desc_set.size(), desc_set.data(), 0, nullptr);
