@@ -96,7 +96,7 @@ private:
 
 struct ComputePass
 {
-    ComputePass* set_mem_mapping(const std::vector<MemMapping*>& used_mappings);
+    ComputePass* use_mem_mapping(const std::vector<MemMapping*>& used_mappings);
     ComputePass* set_workgroup_dims(int x, int y, int z);
     ComputePass* set_mem_barrier(const std::vector<MemMapping*>& mem_barriers);
     ComputePass* load_shader_from_file(const std::string_view& shader_path);
@@ -568,8 +568,11 @@ MemMapping& MemMapping::operator=(MemMapping&& other)
 
 bool MemMapping::memcpy_from(const void* ptr, size_t size)
 {
-    void* mapped_data;
+    assert(ptr != nullptr && "Invalid pointer");
+    assert(size > 0 && "Invalid buffer size");
+    assert(size <= this->size && "Invalid buffer size greate than pre-allocated buffer size");
 
+    void* mapped_data;
     VkMappedMemoryRange mem_range{.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE};
     vkMapMemory(instance->device_, host_memory, 0, size, 0, &mapped_data);
     memcpy(mapped_data, ptr, size);
@@ -579,6 +582,10 @@ bool MemMapping::memcpy_from(const void* ptr, size_t size)
 
 bool MemMapping::memcpy_to(void* ptr, size_t size)
 {
+    assert(ptr != nullptr && "Invalid pointer");
+    assert(size > 0 && "Invalid buffer size");
+    assert(size <= this->size && "Invalid buffer size greate than pre-allocated buffer size");
+
     void* mapped_data;
     vkMapMemory(instance->device_, host_memory, 0, size, 0, &mapped_data);
     memcpy(ptr, mapped_data, size);
@@ -677,7 +684,7 @@ bool ComputePass::build_comp_pipeline()
     return true;
 }
 
-ComputePass* ComputePass::set_mem_mapping(const std::vector<MemMapping*>& used_mappings)
+ComputePass* ComputePass::use_mem_mapping(const std::vector<MemMapping*>& used_mappings)
 {
     desc_set.resize(used_mappings.size());
     desc_set_layout.resize(used_mappings.size());
