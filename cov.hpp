@@ -110,8 +110,8 @@ struct ComputePass
     ComputePass* set_inputs(const std::vector<MemMapping*>& input_mappings);
     ComputePass* set_outputs(const std::vector<MemMapping*>& output_mappings);
     ComputePass* set_workgroup_dims(int x, int y, int z);
-    ComputePass* load_shader_from_file(const std::string_view& shader_path);
-    ComputePass* load_bin_shader(const void* shader, size_t size);
+    ComputePass* load_shader(const std::string_view& shader_path);
+    ComputePass* load_shader(const void* shader, size_t size);
     bool build();
 private:
     friend class Instance;
@@ -203,7 +203,7 @@ private:
 // =======================================
 //            Implementation
 // =======================================
-#define COV_IMPLEMENTATION // please delete me
+// #define COV_IMPLEMENTATION // please delete me
 
 
 #ifdef COV_IMPLEMENTATION
@@ -639,7 +639,7 @@ ComputePass::ComputePass(Instance* instance)
 {
 }
 
-ComputePass* ComputePass::load_shader_from_file(const std::string_view& shader_path)
+ComputePass* ComputePass::load_shader(const std::string_view& shader_path)
 {
     std::ifstream ifs(shader_path.data(), std::ios::in | std::ios::binary);
     if (ifs.is_open()) {
@@ -648,7 +648,7 @@ ComputePass* ComputePass::load_shader_from_file(const std::string_view& shader_p
         char* data{new char[size]};
         ifs.seekg(0, std::ios::beg);
         ifs.read(data, size);
-        load_bin_shader(data, size);
+        load_shader(data, size);
         delete [] data;
     } else {
         assert(false && "Load shader fro file failed");
@@ -657,7 +657,7 @@ ComputePass* ComputePass::load_shader_from_file(const std::string_view& shader_p
     return this;
 }
 
-ComputePass* ComputePass::load_bin_shader(const void* shader, size_t size)
+ComputePass* ComputePass::load_shader(const void* shader, size_t size)
 {
     VkShaderModuleCreateInfo create_info{};
     create_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;

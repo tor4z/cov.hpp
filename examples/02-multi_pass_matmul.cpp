@@ -40,14 +40,14 @@ int main()
                 ->build();
 
             instance.add_compute_pass()
-                ->load_shader_from_file(shader_path)
+                ->load_shader(shader_path)
                 ->set_inputs({A_mapping, B_mapping})
                 ->set_outputs({C_mapping})
                 ->set_workgroup_dims(C.row, C.col, 1)
                 ->build();
 
             instance.add_compute_pass()
-                ->load_shader_from_file(shader_path)
+                ->load_shader(shader_path)
                 ->set_inputs({C_mapping, D_mapping})
                 ->set_outputs({E_mapping})
                 ->set_workgroup_dims(E.row, E.col, 1)
