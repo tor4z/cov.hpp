@@ -203,7 +203,7 @@ private:
 // =======================================
 //            Implementation
 // =======================================
-// #define COV_IMPLEMENTATION // please delete me
+#define COV_IMPLEMENTATION // please delete me
 
 
 #ifdef COV_IMPLEMENTATION
@@ -633,18 +633,24 @@ TransferPass* TransferPass::from_device(MemMapping* mapping)
         .buffer = mapping->device_buff,
         .size = VK_WHOLE_SIZE,
     };
+
     if (mapping->stage == MemMapping::AS_TRANSFER_W) {
         src_stage_bit = VK_PIPELINE_STAGE_TRANSFER_BIT;
         mem_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
     } else if (mapping->stage == MemMapping::AS_COMPUTE_W) {
         src_stage_bit = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
         mem_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    } else {
+        mem_barrier.srcAccessMask = VK_ACCESS_NONE;
     }
 
-    vkCmdPipelineBarrier(instance->cmd_buf_, src_stage_bit, VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
-        0, nullptr,
-        1, &mem_barrier,
-        0, nullptr);
+    if (mem_barrier.srcAccessMask != VK_ACCESS_NONE) {
+        vkCmdPipelineBarrier(instance->cmd_buf_, src_stage_bit, VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
+            0, nullptr,
+            1, &mem_barrier,
+            0, nullptr);
+    }
+
     vkCmdCopyBuffer(instance->cmd_buf_, mapping->device_buff, mapping->host_buff, 1, &copy_region);
     mapping->stage = MemMapping::AS_TRANSFER_R;
     return this;
