@@ -7,7 +7,6 @@
 #include <vector>
 #include <string_view>
 #include <vulkan/vulkan.h>
-#include <vulkan/vulkan_core.h>
 
 #define COV_DEF_SINGLETON(classname)                                            \
     static inline classname* instance()                                         \
@@ -203,7 +202,7 @@ private:
 // =======================================
 //            Implementation
 // =======================================
-#define COV_IMPLEMENTATION // please delete me
+// #define COV_IMPLEMENTATION // please delete me
 
 
 #ifdef COV_IMPLEMENTATION
