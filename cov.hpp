@@ -68,8 +68,8 @@ struct MemMapping
     bool copy_from(const void* ptr, size_t size);
     bool copy_to(void* ptr, size_t size);
 private:
-    friend struct TransferPass;
-    friend struct ComputePass;
+    friend struct TransferStep;
+    friend struct ComputeStep;
     friend class Instance;
 
     explicit MemMapping(Instance* instance)
@@ -91,10 +91,10 @@ private:
     AccessStage stage;
 }; // struct MemMapping
 
-struct TransferPass
+struct TransferStep
 {
-    TransferPass* to_device(MemMapping* mapping);
-    TransferPass* from_device(MemMapping* mapping);
+    TransferStep* to_device(MemMapping* mapping);
+    TransferStep* from_device(MemMapping* mapping);
     bool build();
     bool destroy() { return true; }
 private:
@@ -102,21 +102,21 @@ private:
     friend class Instance;
     Instance* instance;
 
-    explicit TransferPass(Instance* instance) : instance(instance) {}
-}; // TransferPass
+    explicit TransferStep(Instance* instance) : instance(instance) {}
+}; // TransferStep
 
-struct ComputePass
+struct ComputeStep
 {
-    ComputePass* set_inputs(const std::vector<MemMapping*>& input_mappings);
-    ComputePass* set_outputs(const std::vector<MemMapping*>& output_mappings);
-    ComputePass* set_workgroup_dims(int x, int y, int z);
-    ComputePass* load_shader(const std::string_view& shader_path);
-    ComputePass* load_shader(const void* shader, size_t size);
+    ComputeStep* set_inputs(const std::vector<MemMapping*>& input_mappings);
+    ComputeStep* set_outputs(const std::vector<MemMapping*>& output_mappings);
+    ComputeStep* set_workgroup_dims(int x, int y, int z);
+    ComputeStep* load_shader(const std::string_view& shader_path);
+    ComputeStep* load_shader(const void* shader, size_t size);
     bool build();
 private:
     friend class Instance;
     friend class MemMapping;
-    explicit ComputePass(Instance* instance);
+    explicit ComputeStep(Instance* instance);
     void destroy(VkDevice device);
     bool build_comp_pipeline();
     bool build_descriptor_set();
@@ -132,7 +132,7 @@ private:
     VkShaderModule shader_module;
     VkPipelineLayout pipeline_layout;
     VkPipelineCache pipeline_cache;
-}; // struct ComputePass
+}; // struct ComputeStep
 
 class Instance
 {
@@ -146,13 +146,13 @@ public:
     Instance& operator=(Instance&&);
 
     MemMapping* add_mem_mapping(size_t size);
-    ComputePass* add_compute_pass();
-    TransferPass* add_transfer_pass();
+    ComputeStep* add_compute_step();
+    TransferStep* add_transfer_step();
     bool execute();
     void destroy();
 private:
-    friend struct TransferPass;
-    friend struct ComputePass;
+    friend struct TransferStep;
+    friend struct ComputeStep;
     friend struct MemMapping;
 
     enum CmdBufStatus {
@@ -168,8 +168,8 @@ private:
     VkCommandBuffer cmd_buf_;
     VkPhysicalDevice phy_device_;
     VkSpecializationInfo spec_info_;
-    std::vector<ComputePass*> comp_passes_;
-    std::vector<TransferPass*> transfer_passes_;
+    std::vector<ComputeStep*> comp_steps_;
+    std::vector<TransferStep*> transfer_steps_;
     std::vector<MemMapping*> mem_mappings_;
     std::vector<VkSpecializationMapEntry> spec_map_entryies_;
     uint32_t queue_index_;
@@ -399,17 +399,17 @@ void Instance::destroy()
     }
     mem_mappings_.clear();
 
-    for (auto& pass : comp_passes_) {
-        pass->destroy(device_);
-        delete pass;
+    for (auto& step : comp_steps_) {
+        step->destroy(device_);
+        delete step;
     }
-    comp_passes_.clear();
+    comp_steps_.clear();
 
-    for (auto& pass : transfer_passes_) {
-        pass->destroy();
-        delete pass;
+    for (auto& step : transfer_steps_) {
+        step->destroy();
+        delete step;
     }
-    transfer_passes_.clear();
+    transfer_steps_.clear();
 
     if (device_) {
         vkDestroyDevice(device_, nullptr);
@@ -508,18 +508,18 @@ bool Instance::init_command_pool(VkDevice device, uint32_t queue_index, VkComman
     return true;
 }
 
-TransferPass* Instance::add_transfer_pass()
+TransferStep* Instance::add_transfer_step()
 {
-    transfer_passes_.push_back(new TransferPass{this});
-    auto pass{transfer_passes_.back()};
-    return pass;
+    transfer_steps_.push_back(new TransferStep{this});
+    auto step{transfer_steps_.back()};
+    return step;
 }
 
-ComputePass* Instance::add_compute_pass()
+ComputeStep* Instance::add_compute_step()
 {
-    comp_passes_.push_back(new ComputePass{this});
-    auto pass{comp_passes_.back()};
-    return pass;
+    comp_steps_.push_back(new ComputeStep{this});
+    auto step{comp_steps_.back()};
+    return step;
 }
 
 void MemMapping::destroy()
@@ -606,7 +606,7 @@ bool MemMapping::copy_to(void* ptr, size_t size)
     return true;
 }
 
-TransferPass* TransferPass::to_device(MemMapping* mapping)
+TransferStep* TransferStep::to_device(MemMapping* mapping)
 {
     assert(mapping != nullptr && "Invalid memory mapping");
 
@@ -617,7 +617,7 @@ TransferPass* TransferPass::to_device(MemMapping* mapping)
     return this;
 }
 
-TransferPass* TransferPass::from_device(MemMapping* mapping)
+TransferStep* TransferStep::from_device(MemMapping* mapping)
 {
     assert(mapping != nullptr && "Invalid memory mapping");
 
@@ -656,18 +656,18 @@ TransferPass* TransferPass::from_device(MemMapping* mapping)
     return this;
 }
 
-bool TransferPass::build()
+bool TransferStep::build()
 {
     return true;
 }
 
-ComputePass::ComputePass(Instance* instance)
+ComputeStep::ComputeStep(Instance* instance)
     : instance(instance)
     , workgroup_dims({1, 1, 1})
 {
 }
 
-ComputePass* ComputePass::load_shader(const std::string_view& shader_path)
+ComputeStep* ComputeStep::load_shader(const std::string_view& shader_path)
 {
     std::ifstream ifs(shader_path.data(), std::ios::in | std::ios::binary);
     if (ifs.is_open()) {
@@ -685,7 +685,7 @@ ComputePass* ComputePass::load_shader(const std::string_view& shader_path)
     return this;
 }
 
-ComputePass* ComputePass::load_shader(const void* shader, size_t size)
+ComputeStep* ComputeStep::load_shader(const void* shader, size_t size)
 {
     VkShaderModuleCreateInfo create_info{};
     create_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -695,7 +695,7 @@ ComputePass* ComputePass::load_shader(const void* shader, size_t size)
     return this;
 }
 
-bool ComputePass::build_comp_pipeline()
+bool ComputeStep::build_comp_pipeline()
 {
     VkPipelineLayoutCreateInfo pipeline_create_info{};
     pipeline_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -727,7 +727,7 @@ bool ComputePass::build_comp_pipeline()
     return true;
 }
 
-ComputePass* ComputePass::set_outputs(const std::vector<MemMapping*>& output_mappings)
+ComputeStep* ComputeStep::set_outputs(const std::vector<MemMapping*>& output_mappings)
 {
     used_mappings.insert(used_mappings.end(), output_mappings.begin(), output_mappings.end());
     for (auto mapping : output_mappings) {
@@ -736,7 +736,7 @@ ComputePass* ComputePass::set_outputs(const std::vector<MemMapping*>& output_map
     return this;
 }
 
-ComputePass* ComputePass::set_inputs(const std::vector<MemMapping*>& input_mappings)
+ComputeStep* ComputeStep::set_inputs(const std::vector<MemMapping*>& input_mappings)
 {
     mem_buf_barriers.resize(input_mappings.size());
     for (size_t i = 0; i < input_mappings.size(); ++i) {
@@ -764,7 +764,7 @@ ComputePass* ComputePass::set_inputs(const std::vector<MemMapping*>& input_mappi
 }
 
 
-bool ComputePass::build_descriptor_set()
+bool ComputeStep::build_descriptor_set()
 {
     desc_set.resize(used_mappings.size());
     desc_set_layout.resize(used_mappings.size());
@@ -828,7 +828,7 @@ bool ComputePass::build_descriptor_set()
     return this;
 }
 
-ComputePass* ComputePass::set_workgroup_dims(int x, int y, int z)
+ComputeStep* ComputeStep::set_workgroup_dims(int x, int y, int z)
 {
     workgroup_dims.at(0) = x;
     workgroup_dims.at(1) = y;
@@ -836,7 +836,7 @@ ComputePass* ComputePass::set_workgroup_dims(int x, int y, int z)
     return this;
 }
 
-bool ComputePass::build()
+bool ComputeStep::build()
 {
     build_descriptor_set();
     build_comp_pipeline();
@@ -882,7 +882,7 @@ bool ComputePass::build()
     return true;
 }
 
-void ComputePass::destroy(VkDevice device) {
+void ComputeStep::destroy(VkDevice device) {
     vkDestroyPipeline(device, comp_pipeline, nullptr);
     vkDestroyDescriptorPool(device, desc_pool, nullptr);
 }

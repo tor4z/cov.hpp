@@ -12,11 +12,11 @@ target_link_libraries(matmul
 )
 
 
-add_executable(multi_pass_matmul
-    02-multi_pass_matmul.cpp
+add_executable(multi_step_matmul
+    02-multi_step_matmul.cpp
     mat.cpp
 )
 
-target_link_libraries(multi_pass_matmul
+target_link_libraries(multi_step_matmul
     vulkan
 )

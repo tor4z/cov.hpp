@@ -28,19 +28,19 @@ int main()
 
         {
             // buid compute pipeline
-            instance.add_transfer_pass()
+            instance.add_transfer_step()
                 ->to_device(A_mapping)
                 ->to_device(B_mapping)
                 ->build();
 
-            instance.add_compute_pass()
+            instance.add_compute_step()
                 ->load_shader(shader_path)
                 ->set_inputs({A_mapping, B_mapping})
                 ->set_outputs({C_mapping})
                 ->set_workgroup_dims(C.row, C.col, 1)
                 ->build();
 
-            instance.add_transfer_pass()
+            instance.add_transfer_step()
                 ->from_device(C_mapping)
                 ->build();
         }
